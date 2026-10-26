@@ -40,7 +40,7 @@ import CoreMedia
         if includeComputer { files.append(stem + "-computer.m4a") }
         started = Date(); elapsed = 0; failure = nil; recording = true
         timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.elapsed = Date().timeIntervalSince(self.started)
                 if self.microphone?.isRecording == false { self.failure = "The microphone stopped unexpectedly. Stop and save, then check your input device." }
