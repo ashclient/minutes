@@ -16,7 +16,7 @@ jobs:
         run: bash build.command
       - name: Verify and package app
         run: |
-          lipo -verify_arch arm64 x86_64 dist/Minutes.app/Contents/MacOS/Minutes
+          lipo dist/Minutes.app/Contents/MacOS/Minutes -verify_arch arm64 x86_64
           codesign --verify --deep --strict dist/Minutes.app
           ditto -c -k --sequesterRsrc --keepParent dist/Minutes.app dist/Minutes-App.zip
       - uses: actions/upload-artifact@v4
