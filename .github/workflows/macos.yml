@@ -1,0 +1,26 @@
+name: Build Minutes for Mac
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test, check and build for Apple Silicon and Intel
+        env:
+          MINUTES_RUN_TESTS: '1'
+          MINUTES_UNIVERSAL: '1'
+          CI: 'true'
+        run: bash build.command
+      - name: Verify and package app
+        run: |
+          lipo -verify_arch arm64 x86_64 dist/Minutes.app/Contents/MacOS/Minutes
+          codesign --verify --deep --strict dist/Minutes.app
+          ditto -c -k --sequesterRsrc --keepParent dist/Minutes.app dist/Minutes-App.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Minutes-App
+          path: dist/Minutes-App.zip
+          if-no-files-found: error

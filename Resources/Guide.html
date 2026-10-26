@@ -1,0 +1,51 @@
+<!doctype html><meta charset="utf-8"><title>Minutes guide</title><style>body{max-width:760px;margin:40px auto;font:14px/1.6 system-ui;padding:24px}pre{white-space:pre-wrap}</style><pre># Minutes — simple recording notes
+
+One flow: **Record → Stop &amp; make notes → Mac transcription → AI notes**.
+
+The app now opens as a compact 640 × 580 window. The main screen has your notes and one recording button. History, recordings, transcript, and settings are tucked away. Notebooks, task management, model selection, and multiple note tabs have been removed from the main interface. Existing data is preserved.
+
+## Install the update
+
+1. Quit the old Minutes app.
+2. Extract this ZIP. Run `bash ` followed by dragging the new `build.command` into Terminal.
+3. The launcher runs standalone core checks using Command Line Tools (no XCTest needed), builds the app, and reveals `dist/Minutes.app`.
+4. Drag that app into Applications and replace your old Minutes app.
+
+Requires macOS 14+ and Apple Command Line Tools. Your notes remain in `~/Library/Application Support/Minutes`; replacing the app does not remove them.
+
+## Connect once
+
+Open the gear button or **Connect AI**, get an API key from https://openrouter.ai/settings/keys and save it. Minutes uses **`openrouter/free`** automatically. No local language model or model picker is needed. The router selects an available free model supporting the request; quality, availability and free usage limits vary. Minutes never switches to a paid model.
+
+After connecting, Stop &amp; make notes automatically sends the locally transcribed text to OpenRouter and its selected model provider. The cloud service receives text, not the audio. Your API key is saved in macOS Keychain. The old Groq key is not reused or sent to OpenRouter. You can disconnect in Settings → More.
+
+## Everyday use
+
+- Press **Record**. For an online call, enable **Include computer audio** in Settings first and wear headphones. Let participants know before recording.
+- Press **Stop &amp; make notes**. Audio is saved, your Mac transcribes it, and the app writes notes and a title automatically. It adapts the notes to meeting or lecture content.
+- **Copy**, **Edit**, and **Details** sit under the finished notes. Details contains playback, the transcript, pasted text, and recording removal.
+- **History** opens previous notes. Trash is available there, with restore on selection and permanent deletion in the context menu.
+- The three-dot menu imports audio/text, exports notes, and creates text backups. Imported audio follows the same automatic flow.
+- If no AI key is set, transcription still finishes locally. Connect AI to continue. If a request fails or you cancel, Retry reuses completed audio-track transcripts. Incomplete tracks are transcribed again.
+- Notes are not replaced by failed, missing, or truncated AI responses. The generated title will not overwrite a title you changed while processing.
+- Audio can be removed in Details after transcription to save disk space. The transcript and notes remain. Recordings are never deleted automatically.
+
+## Speech and data
+
+Transcription uses Apple&#x27;s on-device speech recognizer. Mac/language support varies; you may need to enable Dictation and download a language in macOS Keyboard settings. Speech is processed after recording in short segments. The app identifies microphone/computer sources, not individual speakers. Two audio tracks are approximately aligned rather than sample synchronized.
+
+Full backup: quit the app and copy `~/Library/Application Support/Minutes`. JSON text exports omit audio; copying the whole folder preserves recordings. The app keeps an atomic primary JSON and one prior version. If primary data cannot be read, it refuses to overwrite it. This remains a single-user notes app, with no cloud synchronization or collaboration.
+
+## Verification and limitations
+
+This update was authored in Linux. All Swift files pass a grammar parse; the shell and plist were checked. A simulated command-line build checks that the default launcher never invokes XCTest, assembles the correct bundle, and stops if checks fail. No macOS compiler, microphone, UI runtime, or authenticated OpenRouter session is available here, so a native build and end-to-end recording test are not claimed.
+
+The default Mac launcher now runs real standalone Swift core checks before building: default/free/text-only API request, response errors, truncation, Unicode chunking, title preservation, and compatibility with older notes. These checks use no network and no XCTest. Full Xcode users can additionally run `MINUTES_RUN_TESTS=1 bash build.command`.
+
+The app is ad-hoc signed locally, not notarized for public distribution. It builds for the current Mac&#x27;s processor. The included GitHub workflow is an optional macOS build route, not a workflow executed during this delivery.
+
+API references:
+- https://openrouter.ai/docs/guides/routing/routers/free-router
+- https://openrouter.ai/docs/api/reference/limits
+- https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request
+</pre>
