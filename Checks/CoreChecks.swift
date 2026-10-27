@@ -52,6 +52,17 @@ import FoundationNetworking
         let restored = try JSONDecoder().decode(Archive.self, from: JSONSerialization.data(withJSONObject: legacy)).meetings[0]
         precondition(restored.title == "My custom title" && restored.transcript[0].text == "Keep these words.")
         precondition(restored.transcribedFiles == nil && restored.pipelineStatus == nil && restored.transcript[0].audioFile == nil)
+        let windows = SpeechWindow.plan(duration: 125)
+        precondition(windows.count == 4)
+        precondition(windows.allSatisfy { $0.end - $0.start <= 50 })
+        let boundaryWords = [SpeechToken(seconds: 39.8, duration: 0.6, text: "boundary"), SpeechToken(seconds: 79.6, duration: 0.5, text: "retained"), SpeechToken(seconds: 124, duration: 0.5, text: "last")]
+        for word in boundaryWords { precondition(windows.filter { $0.owns(word) }.count == 1) }
+        let assembled = SpeechParagraphs.lines(boundaryWords, source: "Microphone", timeOffset: 0)
+        precondition(assembled.map(\.text).joined(separator: " ").contains("boundary"))
+        precondition(assembled.map(\.text).joined(separator: " ").contains("last"))
+        meeting.notes = "My own context and examples"
+        meeting.apply(result, originalTitle: meeting.title)
+        precondition(meeting.notes == "My own context and examples")
         print("Minutes core checks passed: default request, response errors, Unicode chunks, safe titles, and older notes.")
     }
 }

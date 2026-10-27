@@ -88,3 +88,40 @@ extension Meeting {
         pipelineStatus = "ready"; pipelineError = nil
     }
 }
+
+struct SpeechWindow {
+    let start: Double
+    let end: Double
+    let ownedStart: Double
+    let ownedEnd: Double
+    func owns(_ token: SpeechToken) -> Bool {
+        let midpoint = token.seconds + token.duration / 2
+        return midpoint >= ownedStart && midpoint < ownedEnd
+    }
+    static func plan(duration: Double) -> [SpeechWindow] {
+        guard duration.isFinite, duration > 0 else { return [] }
+        return stride(from: 0.0, to: duration, by: 40).map {
+            SpeechWindow(start: max(0, $0 - 5), end: min(duration, $0 + 45), ownedStart: $0, ownedEnd: min(duration, $0 + 40))
+        }
+    }
+}
+struct SpeechToken {
+    var seconds: Double
+    var duration: Double
+    var text: String
+}
+enum SpeechParagraphs {
+    static func lines(_ tokens: [SpeechToken], source: String, timeOffset: Double) -> [TranscriptLine] {
+        var result: [TranscriptLine] = []; var words: [String] = []; var start = 0.0; var previousEnd = 0.0
+        func flush() {
+            if !words.isEmpty { result.append(TranscriptLine(seconds: timeOffset + start, source: source, text: words.joined(separator: " "))); words = [] }
+        }
+        for token in tokens.sorted(by: { $0.seconds < $1.seconds }) {
+            if !words.isEmpty, token.seconds - previousEnd > 2.0 || words.count >= 60 { flush() }
+            if words.isEmpty { start = token.seconds }
+            words.append(token.text); previousEnd = token.seconds + token.duration
+            if token.text.hasSuffix(".") || token.text.hasSuffix("?") || token.text.hasSuffix("!") { flush() }
+        }
+        flush(); return result
+    }
+}

@@ -15,6 +15,9 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
     @State private var editing = false
     @State private var draft = ""
     @State private var regenerate = false
+    @State private var transcribeAgain = false
+    @State private var pane = "My notes"
+    @FocusState private var writing: Bool
     private var meeting: Meeting? { store.meetings.first { $0.id == store.selectedID && !$0.trashed } }
     private var locked: Bool { recorder.recording || pipeline.working }
 
@@ -23,6 +26,7 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
             HStack {
                 Text("Minutes").font(.system(size: 16, weight: .semibold))
                 Spacer()
+                Button { store.create(); pane = "My notes" } label: { Label("New note", systemImage: "square.and.pencil") }.disabled(locked)
                 Button { history = true } label: { Label("History", systemImage: "clock") }.disabled(locked)
                 Button { setup = true } label: { Image(systemName: "gearshape") }.help("Settings").disabled(locked)
                 Menu {
@@ -31,6 +35,7 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
                     Button("Export text backup…") { store.export() }
                     if let meeting {
                         Divider()
+                        if !meeting.audioFiles.isEmpty { Button("Transcribe again…") { transcribeAgain = true } }
                         Button("Export notes…") { store.export(meeting) }
                         Button("Move to Trash") { store.update(meeting.id) { $0.trashed = true }; store.selectedID = nil }
                     }
@@ -42,6 +47,36 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
                     if let meeting {
                         TextField("Meeting title", text: Binding(get: { self.meeting?.title ?? "" }, set: { value in store.update(meeting.id) { $0.title = value } }))
                             .font(.system(size: 23, weight: .semibold)).textFieldStyle(.plain)
+                        Picker("View", selection: $pane) {
+                            Text("My notes").tag("My notes")
+                            Text("AI notes").tag("AI notes")
+                            Text("Transcript").tag("Transcript")
+                        }.pickerStyle(.segmented)
+                        if pane == "My notes" {
+                            Text("Write before or during recording. These notes are included in the AI summary.").font(.caption).foregroundStyle(.secondary)
+                            TextEditor(text: Binding(get: { self.meeting?.notes ?? "" }, set: { value in store.update(meeting.id) { $0.notes = value } }))
+                                .font(.system(size: 14)).lineSpacing(5).scrollContentBackground(.hidden)
+                                .frame(minHeight: 260).focused($writing).disabled(pipeline.working)
+                            Text(store.saveState).font(.caption).foregroundStyle(.secondary)
+                        } else if pane == "Transcript" {
+                            Text(recorder.recording ? recorder.liveStatus : "Transcribed on your Mac").font(.caption).foregroundStyle(.secondary)
+                            ScrollViewReader { proxy in
+                                ScrollView {
+                                    VStack(alignment: .leading, spacing: 14) {
+                                        if meeting.transcript.isEmpty { Text(recorder.recording ? "Listening…" : "Record or import audio to get a transcript.").foregroundStyle(.secondary) }
+                                        ForEach(meeting.transcript) { line in
+                                            VStack(alignment: .leading, spacing: 3) {
+                                                Text("\(line.timestamp) · \(line.source)").font(.caption).foregroundStyle(.secondary)
+                                                Text(line.text).font(.callout).textSelection(.enabled)
+                                            }.frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                        Color.clear.frame(height: 1).id("transcriptEnd")
+                                    }
+                                }.frame(height: 280)
+                                .onChange(of: meeting.transcript.last?.text) { _, _ in if recorder.recording { proxy.scrollTo("transcriptEnd", anchor: .bottom) } }
+                            }
+                            Button("Details & recordings") { details = true }.font(.caption).buttonStyle(.plain).disabled(locked)
+                        } else {
                         if !meeting.summary.isEmpty {
                             NoteDocument(text: meeting.finishedNotes)
                             HStack(spacing: 16) {
@@ -60,10 +95,12 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
                             Button("Details") { details = true }.font(.caption).buttonStyle(.plain)
                             if !meeting.notes.isEmpty { NoteDocument(text: meeting.notes) }
                         }
+                        }
                         if !locked { recovery(meeting) }
                     } else {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Just press record.").font(.system(size: 25, weight: .semibold))
+                            Button("Or start with a note") { store.create(); pane = "My notes" }.buttonStyle(.plain).foregroundStyle(accent)
                             Text("Your Mac transcribes. AI makes the notes.").font(.callout).foregroundStyle(.secondary)
                         }.padding(.top, 38)
                     }
@@ -88,6 +125,11 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
         .confirmationDialog("Replace the generated notes?", isPresented: $regenerate) {
             Button("Generate again") { if let meeting { pipeline.resume(id: meeting.id, store: store, recorder: recorder) } }
         } message: { Text("This replaces your current generated notes and next steps. The transcript is kept.") }
+        .confirmationDialog("Transcribe the saved recording again?", isPresented: $transcribeAgain) {
+            Button("Transcribe & regenerate notes") { if let meeting { pipeline.retranscribe(id: meeting.id, store: store, recorder: recorder) } }
+        } message: { Text("This refreshes the transcript and AI notes. Your own notes and audio are kept.") }
+        .onChange(of: store.selectedID) { _, _ in pane = meeting?.summary.isEmpty == false ? "AI notes" : "My notes" }
+        .onChange(of: meeting?.pipelineStatus) { _, status in if status == "ready", !writing { pane = "AI notes" } }
         .alert("Minutes", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("OK") { store.error = nil } } message: { Text(store.error ?? "") }
 
     }
@@ -120,7 +162,7 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
                 if !connected { Button("Connect AI") { setup = true }.font(.caption).buttonStyle(.plain).foregroundStyle(.secondary) }
                 else { Text(store.saveState == "Save failed" ? "Save failed" : "Ready").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
-                Button(meeting == nil ? "Record" : "New recording", systemImage: "mic.fill") { pipeline.start(store: store, recorder: recorder) }.buttonStyle(.borderedProminent).keyboardShortcut("r", modifiers: [.command, .shift])
+                Button(meeting == nil || (meeting?.audioFiles.isEmpty == true && meeting?.summary.isEmpty == true) ? "Record" : "New recording", systemImage: "mic.fill") { pipeline.start(store: store, recorder: recorder) }.buttonStyle(.borderedProminent).keyboardShortcut("r", modifiers: [.command, .shift])
             }
         }.padding(.horizontal, 24).padding(.vertical, 16)
     }

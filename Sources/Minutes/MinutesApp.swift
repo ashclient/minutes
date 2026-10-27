@@ -17,7 +17,7 @@ import AppKit
         .defaultSize(width: 640, height: 580)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New recording") { pipeline.start(store: store, recorder: recorder) }.keyboardShortcut("n").disabled(store.busy || recorder.recording)
+                Button("New note") { store.create() }.keyboardShortcut("n").disabled(store.busy || recorder.recording)
                 Button("Import notes or backup…") { store.importText() }.keyboardShortcut("o").disabled(store.busy || recorder.recording)
                 Button("Export text backup…") { store.export() }.keyboardShortcut("s", modifiers: [.command, .shift])
             }

@@ -30,8 +30,22 @@ import AVFoundation
         }
     }
     func start(store: Store, recorder: Recorder) {
-        guard !working, !recorder.recording, let id = store.create() else { return }
-        store.update(id) { $0.title = "Meeting · " + Date().formatted(date: .abbreviated, time: .shortened); $0.transcribedFiles = [] }
+        guard !working, !recorder.recording else { return }
+        let draft = store.meetings.first { $0.id == store.selectedID && !$0.trashed && $0.audioFiles.isEmpty && $0.transcript.isEmpty && $0.summary.isEmpty }
+        guard let id = draft?.id ?? store.create() else { return }
+        store.update(id) {
+            if $0.title == "Untitled meeting" { $0.title = "Meeting · " + Date().formatted(date: .abbreviated, time: .shortened) }
+            $0.transcribedFiles = []
+        }
+        recorder.onLiveText = { lines, file in
+            var tagged = lines
+            for i in tagged.indices { tagged[i].audioFile = file }
+            store.update(id) { meeting in
+                meeting.transcript.removeAll { $0.audioFile == file }
+                meeting.transcript += tagged
+                meeting.transcript.sort { $0.seconds < $1.seconds }
+            }
+        }
         run(id: id, store: store, cancel: false) {
             self.state("starting", "Starting microphone…", id: id, store: store)
             try await recorder.start(id: id, directory: store.audio, includeComputer: UserDefaults.standard.bool(forKey: "includeComputer"))
@@ -44,7 +58,12 @@ import AVFoundation
         store.selectedID = id
         run(id: id, store: store, cancel: false) {
             self.state("saving", "Saving recording…", id: id, store: store)
-            _ = await recorder.stop(); store.saveNow()
+            _ = await recorder.stop()
+            recorder.onLiveText = nil
+            if recorder.liveComplete, let file = recorder.files.first {
+                store.update(id) { $0.transcribedFiles = [file] }
+            }
+            store.saveNow()
             // Do not silently summarize an incomplete capture.
             if let failure = recorder.failure { throw AppFailure(failure + " Your saved tracks are in Details. Retry to process what was captured.") }
             self.canCancel = true
@@ -54,6 +73,11 @@ import AVFoundation
     func resume(id: UUID, store: Store, recorder: Recorder) {
         guard !working, !recorder.recording else { return }
         run(id: id, store: store, cancel: true) { try await self.process(id: id, store: store) }
+    }
+    func retranscribe(id: UUID, store: Store, recorder: Recorder) {
+        guard !working, !recorder.recording else { return }
+        store.update(id) { $0.transcribedFiles = [] }
+        resume(id: id, store: store, recorder: recorder)
     }
     func cancel() { if canCancel { work?.cancel() } }
 
@@ -83,6 +107,7 @@ import AVFoundation
                     var tagged = lines
                     for i in tagged.indices { tagged[i].audioFile = file }
                     store.update(id) { meeting in
+                        if !tagged.isEmpty { meeting.transcript.removeAll { $0.audioFile == nil && $0.source != "Pasted" } }
                         meeting.transcript.removeAll { $0.audioFile == file }
                         meeting.transcript += tagged
                         meeting.transcript.sort { $0.seconds < $1.seconds }
@@ -111,7 +136,7 @@ import AVFoundation
         let key = try CloudKey.read()
         guard !key.isEmpty else { state("needsKey", "Add your OpenRouter key to finish these notes.", id: id, store: store); return }
         state("generating", "Writing your notes…", id: id, store: store)
-        let source = [meeting.notes, meeting.transcriptText].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        let source = ["USER NOTES:\n" + meeting.notes, "TRANSCRIPT:\n" + meeting.transcriptText].filter { !$0.isEmpty }.joined(separator: "\n\n")
         let result = try await AIClient(apiKey: key).summarize(source, progress: { text in self.message = text; store.progress = text })
         try Task.checkCancellation()
         store.update(id) { $0.apply(result, originalTitle: meeting.title) }

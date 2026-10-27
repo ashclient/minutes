@@ -8,6 +8,11 @@ import CoreMedia
     @Published var elapsed: TimeInterval = 0
     @Published var level: Float = 0
     @Published var failure: String?
+    @Published var liveStatus = ""
+    var onLiveText: (([TranscriptLine], String) -> Void)?
+    private var liveCoversStart = false
+    private var live: LiveSpeech?
+    private(set) var liveComplete = false
     private var microphone: AVAudioRecorder?
     private var computer: ComputerAudio?
     private var timer: Timer?
@@ -39,6 +44,13 @@ import CoreMedia
         microphone = rec; computer = system; meetingID = id; files = [micName]
         if includeComputer { files.append(stem + "-computer.m4a") }
         started = Date(); elapsed = 0; failure = nil; recording = true
+        liveComplete = false
+        let speech = LiveSpeech()
+        do {
+            try await speech.start { [weak self] lines in self?.onLiveText?(lines, micName) }
+            liveCoversStart = Date().timeIntervalSince(started) < 0.75
+            live = speech; liveStatus = "Live microphone transcript"
+        } catch { liveStatus = "Recording saved; transcription will run after you stop." }
         timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -53,6 +65,7 @@ import CoreMedia
     func stop() async -> (UUID, [String])? {
         guard recording, let id = meetingID else { return nil }
         timer?.invalidate(); timer = nil; microphone?.stop(); microphone = nil
+        if let live { liveComplete = await live.stop() && liveCoversStart }; live = nil
         if let computer { do { try await computer.stop() } catch { failure = error.localizedDescription } }
         self.computer = nil; recording = false; level = 0; meetingID = nil
         return (id, files)
@@ -128,7 +141,8 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate {
 
 @MainActor final class SpeechTranscriber {
     private var task: SFSpeechRecognitionTask?
-    private var continuation: CheckedContinuation<[TranscriptLine], Error>?
+    private var continuation: CheckedContinuation<[SpeechToken], Error>?
+    private var latestTokens: [SpeechToken] = []
     private var timeout: Task<Void, Never>?
     private var requestID: UUID?
 
@@ -142,49 +156,47 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate {
         let asset = AVURLAsset(url: url)
         let duration = try await asset.load(.duration).seconds
         guard duration.isFinite, duration > 0 else { throw AppFailure("This audio file is empty or unreadable.") }
-        var lines: [TranscriptLine] = []
-        var offset = 0.0
-        while offset < duration {
+        var tokens: [SpeechToken] = []
+        let windows = SpeechWindow.plan(duration: duration)
+        for (index, window) in windows.enumerated() {
             try Task.checkCancellation()
-            progress("Transcribing \(source.lowercased()) · \(Int(offset / max(duration, 1) * 100))%")
+            progress("Transcribing \(source.lowercased()) · \(index + 1) of \(windows.count)")
             let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".m4a")
             defer { try? FileManager.default.removeItem(at: temporary) }
             guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else { throw AppFailure("This audio format cannot be decoded. Try M4A, MP3, or WAV.") }
             exporter.outputURL = temporary; exporter.outputFileType = .m4a
-            exporter.timeRange = CMTimeRange(start: CMTime(seconds: offset, preferredTimescale: 600), duration: CMTime(seconds: min(45, duration - offset), preferredTimescale: 600))
+            exporter.timeRange = CMTimeRange(start: CMTime(seconds: window.start, preferredTimescale: 600), duration: CMTime(seconds: window.end - window.start, preferredTimescale: 600))
             await exporter.export()
+            try Task.checkCancellation()
             guard exporter.status == .completed else { throw exporter.error ?? AppFailure("Could not prepare audio for transcription.") }
-            let chunk = try await recognize(temporary, recognizer: recognizer, source: source, offset: timeOffset + offset)
-            lines += chunk; partial(lines)
-            offset += 45
+            let recognized = try await recognize(temporary, recognizer: recognizer, offset: window.start)
+            tokens += recognized.filter { window.owns($0) }
+            partial(SpeechParagraphs.lines(tokens, source: source, timeOffset: timeOffset))
         }
-        return lines
+        return SpeechParagraphs.lines(tokens, source: source, timeOffset: timeOffset)
     }
-    private func recognize(_ url: URL, recognizer: SFSpeechRecognizer, source: String, offset: Double) async throws -> [TranscriptLine] {
+    private func recognize(_ url: URL, recognizer: SFSpeechRecognizer, offset: Double) async throws -> [SpeechToken] {
         let token = UUID()
         let request = SFSpeechURLRecognitionRequest(url: url)
-        request.requiresOnDeviceRecognition = true; request.shouldReportPartialResults = false
+        request.requiresOnDeviceRecognition = true; request.shouldReportPartialResults = true
+        request.taskHint = .dictation
+        request.addsPunctuation = true
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
                 if Task.isCancelled { continuation.resume(throwing: CancellationError()); return }
                 self.continuation = continuation
                 self.requestID = token
+                self.latestTokens = []
                 task = recognizer.recognitionTask(with: request) { [weak self] result, error in
                     Task { @MainActor in
                         guard let self, self.continuation != nil, self.requestID == token else { return }
-                        if let result, result.isFinal {
-                            var lines: [TranscriptLine] = []; var words: [String] = []; var start = 0.0
-                            for segment in result.bestTranscription.segments {
-                                if words.isEmpty { start = segment.timestamp }
-                                words.append(segment.substring)
-                                if segment.timestamp - start >= 12 || segment.substring.hasSuffix(".") || segment.substring.hasSuffix("?") {
-                                    lines.append(TranscriptLine(seconds: offset + start, source: source, text: words.joined(separator: " "))); words = []
-                                }
-                            }
-                            if !words.isEmpty { lines.append(TranscriptLine(seconds: offset + start, source: source, text: words.joined(separator: " "))) }
-                            self.finish(.success(lines))
-                        } else if let error {
-                            if (error as NSError).code == 1110 { self.finish(.success([])) }
+                        if let result {
+                            self.latestTokens = result.bestTranscription.segments.map { SpeechToken(seconds: offset + $0.timestamp, duration: $0.duration, text: $0.substring) }
+                            if result.isFinal { self.finish(.success(self.latestTokens)); return }
+                        }
+                        if let error {
+                            // A trailing no-speech event must not discard words already recognized.
+                            if (error as NSError).code == 1110 { self.finish(.success(self.latestTokens)) }
                             else { self.finish(.failure(error)) }
                         }
                     }
@@ -196,7 +208,7 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate {
             }
         }, onCancel: { Task { @MainActor [weak self] in self?.finish(.failure(CancellationError())) } })
     }
-    private func finish(_ result: Result<[TranscriptLine], Error>) {
+    private func finish(_ result: Result<[SpeechToken], Error>) {
         guard let continuation else { return }
         self.continuation = nil; requestID = nil; timeout?.cancel(); timeout = nil
         task?.cancel(); task = nil
