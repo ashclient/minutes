@@ -2,7 +2,8 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
+private let accent = Color(red: 0.22, green: 0.36, blue: 0.29)
+private let canvas = Color(nsColor: .windowBackgroundColor)
 
 @MainActor struct WorkspaceView: View {
     @EnvironmentObject var store: Store
@@ -24,7 +25,10 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Minutes").font(.system(size: 16, weight: .semibold))
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform").font(.system(size: 15, weight: .semibold)).foregroundStyle(accent)
+                    Text("Minutes").font(.system(size: 15, weight: .semibold))
+                }.foregroundStyle(.primary)
                 Spacer()
                 Button { store.create(); pane = "My notes" } label: { Label("New note", systemImage: "square.and.pencil") }.disabled(locked)
                 Button { history = true } label: { Label("History", systemImage: "clock") }.disabled(locked)
@@ -46,18 +50,28 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
                 VStack(alignment: .leading, spacing: 18) {
                     if let meeting {
                         TextField("Meeting title", text: Binding(get: { self.meeting?.title ?? "" }, set: { value in store.update(meeting.id) { $0.title = value } }))
-                            .font(.system(size: 23, weight: .semibold)).textFieldStyle(.plain)
-                        Picker("View", selection: $pane) {
-                            Text("My notes").tag("My notes")
-                            Text("AI notes").tag("AI notes")
-                            Text("Transcript").tag("Transcript")
-                        }.pickerStyle(.segmented)
+                            .font(.system(size: 25, weight: .semibold)).textFieldStyle(.plain)
+                        Text(meeting.createdAt.formatted(date: .abbreviated, time: .shortened)).font(.system(size: 11)).foregroundStyle(.tertiary)
+                        HStack(spacing: 22) {
+                            ForEach(["My notes", "AI notes", "Transcript"], id: \.self) { label in
+                                Button { writing = false; pane = label } label: {
+                                    VStack(spacing: 9) {
+                                        Text(label).font(.system(size: 12, weight: pane == label ? .semibold : .regular)).foregroundStyle(pane == label ? Color.primary : Color.secondary)
+                                        Capsule().fill(pane == label ? accent : Color.clear).frame(height: 2)
+                                    }.fixedSize(horizontal: true, vertical: false)
+                                }.buttonStyle(.plain)
+                            }
+                            Spacer()
+                        }.padding(.top, 8)
+                        Divider().padding(.top, -18)
                         if pane == "My notes" {
-                            Text("Write before or during recording. These notes are included in the AI summary.").font(.caption).foregroundStyle(.secondary)
+                            Text("Your thoughts, questions, and things worth remembering.").font(.caption).foregroundStyle(.secondary)
                             TextEditor(text: Binding(get: { self.meeting?.notes ?? "" }, set: { value in store.update(meeting.id) { $0.notes = value } }))
-                                .font(.system(size: 14)).lineSpacing(5).scrollContentBackground(.hidden)
-                                .frame(minHeight: 260).focused($writing).disabled(pipeline.working)
-                            Text(store.saveState).font(.caption).foregroundStyle(.secondary)
+                                .font(.system(size: 14)).lineSpacing(6).scrollContentBackground(.hidden)
+                                .padding(14).frame(minHeight: 300).focused($writing).disabled(pipeline.working)
+                                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.07), lineWidth: 1))
+                            HStack { Image(systemName: "checkmark"); Text(store.saveState); Spacer(); Text("Included in AI notes") }.font(.system(size: 10)).foregroundStyle(.tertiary)
                         } else if pane == "Transcript" {
                             Text(recorder.recording ? recorder.liveStatus : "Transcribed on your Mac").font(.caption).foregroundStyle(.secondary)
                             ScrollViewReader { proxy in
@@ -78,7 +92,7 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
                             Button("Details & recordings") { details = true }.font(.caption).buttonStyle(.plain).disabled(locked)
                         } else {
                         if !meeting.summary.isEmpty {
-                            NoteDocument(text: meeting.finishedNotes)
+                            NoteDocument(text: meeting.finishedNotes).padding(22).frame(maxWidth: .infinity, alignment: .leading).background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
                             HStack(spacing: 16) {
                                 Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(meeting.finishedNotes, forType: .string) }
                                 Button("Edit") { draft = meeting.finishedNotes; editing = true }.disabled(locked)
@@ -99,17 +113,18 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
                         if !locked { recovery(meeting) }
                     } else {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Just press record.").font(.system(size: 25, weight: .semibold))
+                            Image(systemName: "note.text").font(.system(size: 28, weight: .light)).foregroundStyle(accent).padding(.bottom, 10)
+                            Text("A place for the conversation.").font(.system(size: 26, weight: .semibold))
                             Button("Or start with a note") { store.create(); pane = "My notes" }.buttonStyle(.plain).foregroundStyle(accent)
-                            Text("Your Mac transcribes. AI makes the notes.").font(.callout).foregroundStyle(.secondary)
-                        }.padding(.top, 38)
+                            Text("Write a few thoughts or start a recording.\nYour notes and transcript come together when you’re done.").font(.callout).foregroundStyle(.secondary)
+                        }.padding(.top, 45).padding(.bottom, 30)
                     }
-                }.padding(28).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity, alignment: .center)
+                }.padding(.horizontal, 30).padding(.vertical, 28).frame(maxWidth: 800, alignment: .leading).frame(maxWidth: .infinity, alignment: .center)
             }
             Divider()
             bottomBar
         }
-        .background(Color(nsColor: .textBackgroundColor)).tint(accent)
+        .background(canvas).tint(accent)
         .sheet(isPresented: $history) { HistoryView().environmentObject(store) }
         .sheet(isPresented: $setup, onDismiss: {
             if connected, let meeting, meeting.pipelineStatus == "needsKey", !locked { pipeline.resume(id: meeting.id, store: store, recorder: recorder) }
@@ -154,7 +169,11 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
                 if pipeline.cancellable { Button("Cancel") { pipeline.cancel() }.font(.caption) }
             } else if recorder.recording {
                 Circle().fill(.red).frame(width: 7, height: 7)
-                Text(String(format: "%02d:%02d", Int(recorder.elapsed) / 60, Int(recorder.elapsed) % 60)).monospacedDigit().font(.callout)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(format: "%02d:%02d", Int(recorder.elapsed) / 60, Int(recorder.elapsed) % 60)).monospacedDigit().font(.system(size: 13, weight: .medium))
+                    Text(recorder.inputName).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                ProgressView(value: Double(recorder.level)).tint(accent).frame(width: 65).help("Microphone input level")
                 if let failure = recorder.failure { Text(failure).font(.caption).foregroundStyle(.red).lineLimit(2) }
                 Spacer()
                 Button("Stop & make notes", systemImage: "stop.fill") { pipeline.stop(store: store, recorder: recorder) }.buttonStyle(.borderedProminent)
@@ -164,7 +183,7 @@ private let accent = Color(red: 0.25, green: 0.38, blue: 0.30)
                 Spacer()
                 Button(meeting == nil || (meeting?.audioFiles.isEmpty == true && meeting?.summary.isEmpty == true) ? "Record" : "New recording", systemImage: "mic.fill") { pipeline.start(store: store, recorder: recorder) }.buttonStyle(.borderedProminent).keyboardShortcut("r", modifiers: [.command, .shift])
             }
-        }.padding(.horizontal, 24).padding(.vertical, 16)
+        }.padding(.horizontal, 24).padding(.vertical, 17).background(Color(nsColor: .textBackgroundColor))
     }
     private func importAudio() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.audio, .movie]
@@ -241,6 +260,9 @@ struct NoteDocument: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack { Text("Details").font(.headline); Spacer(); Button("Done") { dismiss() } }
             if let meeting {
+                if let info = meeting.audioDiagnostics {
+                    DisclosureGroup("Recording information") { Text(info).font(.caption).textSelection(.enabled).foregroundStyle(.secondary) }
+                }
                 if !meeting.audioFiles.isEmpty {
                     HStack { Text("Recordings").font(.subheadline).fontWeight(.medium); Spacer(); Button("Stop playback") { player.stop() }.font(.caption) }
                     ForEach(Array(meeting.audioFiles.enumerated()), id: \.element) { index, file in

@@ -2,133 +2,109 @@ import AVFoundation
 import Speech
 import SwiftUI
 
-// The audio callback and recognition rotations share only this locked buffer feed.
 final class SpeechFeed: @unchecked Sendable {
     private let lock = NSLock()
     private var request: SFSpeechAudioBufferRecognitionRequest?
-    private var history: [AVAudioPCMBuffer] = []
-    private var historySeconds = 0.0
-    private var totalSeconds = 0.0
+    private var history: [(AVAudioPCMBuffer, Double, Double)] = []
+    private var total = 0.0
+    var receivedSeconds: Double { lock.lock(); defer { lock.unlock() }; return total }
     func append(_ buffer: AVAudioPCMBuffer) {
         lock.lock(); defer { lock.unlock() }
         request?.append(buffer)
-        let seconds = Double(buffer.frameLength) / buffer.format.sampleRate
-        totalSeconds += seconds
-        guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else { return }
-        copy.frameLength = buffer.frameLength
-        let src = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffer.audioBufferList))
-        let dst = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
-        for i in src.indices {
-            if let from = src[i].mData, let to = dst[i].mData { memcpy(to, from, Int(src[i].mDataByteSize)) }
-        }
-        history.append(copy); historySeconds += seconds
-        while historySeconds > 3.5, history.count > 1 {
-            let removed = history.removeFirst(); historySeconds -= Double(removed.frameLength) / removed.format.sampleRate
-        }
+        let start = total; total += Double(buffer.frameLength) / buffer.format.sampleRate
+        // The capture worker gives us independently owned buffers.
+        history.append((buffer, start, total))
+        while let first = history.first, first.2 < total - 12 { history.removeFirst() }
     }
-    func replace(with next: SFSpeechAudioBufferRecognitionRequest) -> (Double, Double, SFSpeechAudioBufferRecognitionRequest?) {
+    func attach(_ next: SFSpeechAudioBufferRecognitionRequest, since: Double) {
         lock.lock(); defer { lock.unlock() }
-        let previous = request
-        for buffer in history { next.append(buffer) }
+        for (buffer, _, end) in history where end > since { next.append(buffer) }
         request = next
-        return (totalSeconds - historySeconds, totalSeconds, previous)
     }
-    func finish() {
-        lock.lock(); let previous = request; request = nil; lock.unlock()
-        previous?.endAudio()
+    @discardableResult func detach() -> Double {
+        lock.lock(); let previous = request; request = nil; let time = total; lock.unlock()
+        previous?.endAudio(); return time
     }
 }
 
 @MainActor final class LiveSpeech {
-    private struct Session {
-        var id: UUID
-        var offset: Double
-        var from: Double
-        var to = Double.infinity
-        var tokens: [SpeechToken] = []
-        var final = false
-    }
-    private let feed = SpeechFeed()
-    private let engine = AVAudioEngine()
+    let feed = SpeechFeed()
     private var recognizer: SFSpeechRecognizer?
-    private var sessions: [Session] = []
-    private var tasks: [UUID: SFSpeechRecognitionTask] = [:]
+    private var task: SFSpeechRecognitionTask?
     private var timer: Timer?
+    private var transition: Task<Void, Never>?
     private var stopped = false
+    private var ended = false
     private var failed = false
-    private var lastRotation = Date.distantPast
+    private var token = UUID()
+    private var completed = ""
+    private var current = LiveTextAccumulator()
     private var onText: (([TranscriptLine]) -> Void)?
-
+    var status = "Live microphone transcript"
     func prepare() async throws {
         let permission = await withCheckedContinuation { c in SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) } }
-        guard permission == .authorized else { throw AppFailure("Live speech permission is unavailable.") }
+        guard permission == .authorized else { throw AppFailure("Speech permission is off. Enable Minutes in Privacy & Security → Speech Recognition.") }
         let locale = UserDefaults.standard.string(forKey: "speechLocale") ?? "en-US"
-        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale)), recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { throw AppFailure("Live on-device speech is unavailable for this language.") }
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale)), recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { throw AppFailure("On-device speech is unavailable for \(locale). Check Dictation language assets in macOS Keyboard settings.") }
         self.recognizer = recognizer
     }
     func start(onText: @escaping ([TranscriptLine]) -> Void) async throws {
         if recognizer == nil { try await prepare() }
-        self.onText = onText
-        let input = engine.inputNode; let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { throw AppFailure("No microphone input for live transcription.") }
-        rotate()
-        let feed = self.feed
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in feed.append(buffer) }
-        do { try engine.start() }
-        catch { input.removeTap(onBus: 0); feed.finish(); tasks.values.forEach { $0.cancel() }; throw error }
+        self.onText = onText; begin(since: 0)
         timer = Timer.scheduledTimer(withTimeInterval: 45, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.rotate() }
         }
     }
-    private func rotate() {
+    private func begin(since: Double) {
         guard !stopped, let recognizer else { return }
-        lastRotation = Date()
+        token = UUID(); let id = token; ended = false; current = LiveTextAccumulator()
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true; request.shouldReportPartialResults = true
-        request.addsPunctuation = true; request.taskHint = .dictation
-        let (offset, total, previous) = feed.replace(with: request)
-        // Transfer the last second to the new request, with 3 seconds of context.
-        let boundary = sessions.isEmpty ? 0 : max(0, total - 1)
-        if !sessions.isEmpty { sessions[sessions.count - 1].to = boundary }
-        let id = UUID(); sessions.append(Session(id: id, offset: offset, from: boundary))
-        previous?.endAudio()
-        tasks[id] = recognizer.recognitionTask(with: request) { [weak self] result, error in
+        request.taskHint = .dictation; request.addsPunctuation = true
+        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor [weak self] in
-                guard let self, let index = self.sessions.firstIndex(where: { $0.id == id }) else { return }
-                if let result {
-                    let base = self.sessions[index].offset
-                    self.sessions[index].tokens = result.bestTranscription.segments.map { SpeechToken(seconds: base + $0.timestamp, duration: $0.duration, text: $0.substring) }
-                    self.sessions[index].final = result.isFinal
-                    self.publish()
-                    if result.isFinal, !self.stopped, index == self.sessions.count - 1 {
-                        // An unexpected endpoint may have stopped accepting buffers.
-                        // Continue live where possible and require the saved-audio check.
-                        self.failed = true
-                        if Date().timeIntervalSince(self.lastRotation) > 2 { self.rotate() }
-                    }
+                guard let self, self.token == id else { return }
+                if let result { self.current.update(result.bestTranscription.formattedString); self.ended = result.isFinal; self.publish() }
+                if let error, !self.ended {
+                    self.failed = true; self.ended = true
+                    self.status = "Live speech interrupted (\((error as NSError).code)); saved audio will be checked after stopping."
                 }
-                if error != nil, !self.sessions[index].final { self.failed = true }
+                if self.ended, !self.stopped { self.rotate() }
             }
+        }
+        feed.attach(request, since: since)
+    }
+    private func rotate() {
+        guard !stopped, transition == nil else { return }
+        let cutoff = feed.detach()
+        transition = Task {
+            // Finish/cancel the previous task BEFORE creating the next one.
+            // Incoming audio remains buffered during this handoff.
+            for _ in 0..<20 {
+                if ended || stopped { break }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            guard !stopped else { transition = nil; return }
+            if !ended { failed = true }
+            task?.cancel(); token = UUID()
+            completed = TranscriptText.stitch(completed, current.text)
+            begin(since: max(0, cutoff - 2))
+            transition = nil
         }
     }
     private func publish() {
-        let tokens = sessions.flatMap { session in session.tokens.filter {
-            let midpoint = $0.seconds + $0.duration / 2
-            return midpoint >= session.from && midpoint < session.to
-        } }
-        onText?(SpeechParagraphs.lines(tokens, source: "Microphone", timeOffset: 0))
+        let text = TranscriptText.stitch(completed, current.text)
+        onText?(text.isEmpty ? [] : [TranscriptLine(seconds: 0, source: "Microphone", text: text)])
     }
     func stop() async -> Bool {
         stopped = true; timer?.invalidate(); timer = nil
-        if engine.isRunning { engine.stop(); engine.inputNode.removeTap(onBus: 0) }
-        feed.finish()
+        await transition?.value
+        feed.detach()
         for _ in 0..<40 {
-            if sessions.allSatisfy(\.final) || failed { break }
+            if ended { break }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
-        publish()
-        let complete = !failed && !sessions.isEmpty && sessions.allSatisfy(\.final)
-        tasks.values.forEach { $0.cancel() }; tasks.removeAll(); onText = nil
-        return complete
+        publish(); task?.cancel(); token = UUID(); onText = nil
+        return !failed && ended
     }
 }

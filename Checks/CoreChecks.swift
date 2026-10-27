@@ -63,6 +63,18 @@ import FoundationNetworking
         meeting.notes = "My own context and examples"
         meeting.apply(result, originalTitle: meeting.title)
         precondition(meeting.notes == "My own context and examples")
+        var liveText = LiveTextAccumulator()
+        liveText.update("Today we discuss inventory and working capital.")
+        liveText.update("The second topic is cash flow.")
+        liveText.update("The third topic is retained earnings.")
+        precondition(liveText.text.contains("inventory") && liveText.text.contains("cash flow") && liveText.text.contains("retained earnings"))
+        var revised = LiveTextAccumulator()
+        revised.update("We will send the draft on Tuesday")
+        revised.update("We will send the draft on Thursday.")
+        precondition(revised.text.contains("Thursday") && !revised.text.contains("Tuesday"))
+        revised.update("We")
+        precondition(revised.text.contains("Thursday"))
+        precondition(TranscriptText.stitch("This is the first section about cash flow", "about cash flow and operations").contains("first section about cash flow and operations"))
         print("Minutes core checks passed: default request, response errors, Unicode chunks, safe titles, and older notes.")
     }
 }

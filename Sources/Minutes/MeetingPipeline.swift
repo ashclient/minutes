@@ -60,6 +60,7 @@ import AVFoundation
             self.state("saving", "Saving recording…", id: id, store: store)
             _ = await recorder.stop()
             recorder.onLiveText = nil
+            store.update(id) { $0.audioDiagnostics = recorder.diagnostics }
             if recorder.liveComplete, let file = recorder.files.first {
                 store.update(id) { $0.transcribedFiles = [file] }
             }
@@ -102,7 +103,7 @@ import AVFoundation
             for file in pending {
                 try Task.checkCancellation()
                 guard let url = store.audioURL(file) else { throw AppFailure("A recording path is invalid.") }
-                let source = file.hasSuffix("-mic.m4a") ? "Microphone" : (file.hasSuffix("-computer.m4a") ? "Computer" : "Recording")
+                let source = (file.hasSuffix("-mic.m4a") || file.hasSuffix("-mic.caf")) ? "Microphone" : (file.hasSuffix("-computer.m4a") ? "Computer" : "Recording")
                 let persist: ([TranscriptLine]) -> Void = { lines in
                     var tagged = lines
                     for i in tagged.indices { tagged[i].audioFile = file }
@@ -130,6 +131,13 @@ import AVFoundation
         guard !meeting.transcript.isEmpty || !meeting.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AppFailure("No speech was found. Listen in Details to check your recording, or paste a transcript there.")
         }
+        if recorder.voicedDuration > 10, recorder.files.contains(where: { meeting.audioFiles.contains($0) }) {
+            let wordCount = meeting.transcript.map(\.text).joined(separator: " ").split(whereSeparator: \.isWhitespace).count
+            if Double(wordCount) < recorder.voicedDuration * 0.5 {
+                store.update(id) { $0.transcribedFiles = [] }
+                throw AppFailure("The microphone received audio for \(Int(recorder.voicedDuration)) seconds, but Apple recognized only \(wordCount) words. The transcript is incomplete. Check the speech language and macOS Sound input, or paste a corrected transcript in Details. Your audio and notes are saved.")
+            }
+        }
         guard UserDefaults.standard.bool(forKey: "openRouterEnabled") else {
             state("needsKey", "Transcript saved. Connect OpenRouter to finish your notes.", id: id, store: store); return
         }
@@ -144,6 +152,7 @@ import AVFoundation
     }
     static func group(_ file: String) -> String {
         if file.hasSuffix("-mic.m4a") { return String(file.dropLast(8)) }
+        if file.hasSuffix("-mic.caf") { return String(file.dropLast(8)) }
         if file.hasSuffix("-computer.m4a") { return String(file.dropLast(13)) }
         return file
     }

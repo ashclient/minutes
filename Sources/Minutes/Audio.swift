@@ -10,10 +10,13 @@ import CoreMedia
     @Published var failure: String?
     @Published var liveStatus = ""
     var onLiveText: (([TranscriptLine], String) -> Void)?
-    private var liveCoversStart = false
     private var live: LiveSpeech?
     private(set) var liveComplete = false
-    private var microphone: AVAudioRecorder?
+    private var microphone: MicrophoneCapture?
+    @Published var inputName = "System microphone"
+    private(set) var diagnostics = ""
+    private(set) var voicedDuration = 0.0
+    private var liveWords = 0
     private var computer: ComputerAudio?
     private var timer: Timer?
     private var started = Date()
@@ -28,9 +31,19 @@ import CoreMedia
         var liveAvailable = true
         do { try await speech.prepare() } catch { liveAvailable = false }
         let stem = "\(id.uuidString)-\(UUID().uuidString)"
-        let micName = stem + "-mic.m4a"
-        let rec = try AVAudioRecorder(url: directory.appendingPathComponent(micName), settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue])
-        rec.isMeteringEnabled = true
+        let micName = stem + "-mic.caf"
+        let rec = MicrophoneCapture()
+        liveStatus = "Live microphone transcript"
+        if liveAvailable {
+            do {
+                try await speech.start { [weak self] lines in
+                    self?.liveWords = lines.map(\.text).joined(separator: " ").split(whereSeparator: \.isWhitespace).count
+                    self?.onLiveText?(lines, micName)
+                }
+                live = speech
+            } catch { liveAvailable = false; liveStatus = error.localizedDescription }
+        }
+        if !liveAvailable { liveStatus = "Live speech unavailable; saved audio will be transcribed after stopping." }
         var system: ComputerAudio?
         do {
             if includeComputer {
@@ -38,8 +51,9 @@ import CoreMedia
                 try await capture.start(url: directory.appendingPathComponent(stem + "-computer.m4a"))
                 system = capture
             }
-            guard rec.record() else { throw AppFailure("The microphone could not start. Check that an input device is connected.") }
+            try rec.start(url: directory.appendingPathComponent(micName), feed: speech.feed)
         } catch {
+            if let live { _ = await live.stop() }; live = nil
             if let system { try? await system.stop() }
             try? FileManager.default.removeItem(at: directory.appendingPathComponent(micName))
             throw error
@@ -47,29 +61,30 @@ import CoreMedia
         microphone = rec; computer = system; meetingID = id; files = [micName]
         if includeComputer { files.append(stem + "-computer.m4a") }
         started = Date(); elapsed = 0; failure = nil; recording = true
-        liveComplete = false
-        do {
-            guard liveAvailable else { throw AppFailure("Live speech unavailable.") }
-            try await speech.start { [weak self] lines in self?.onLiveText?(lines, micName) }
-            liveCoversStart = Date().timeIntervalSince(started) < 0.75
-            live = speech; liveStatus = "Live microphone transcript"
-        } catch { liveStatus = "Recording saved; transcription will run after you stop." }
+        liveComplete = false; liveWords = 0; voicedDuration = 0
+        inputName = AVCaptureDevice.default(for: .audio)?.localizedName ?? "System microphone"
         timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.elapsed = Date().timeIntervalSince(self.started)
-                if self.microphone?.isRecording == false { self.failure = "The microphone stopped unexpectedly. Stop and save, then check your input device." }
-                self.microphone?.updateMeters()
-                self.level = pow(10, (self.microphone?.averagePower(forChannel: 0) ?? -160) / 40)
+                if let microphone = self.microphone {
+                    let status = microphone.status
+                    self.level = status.0
+                    if let error = status.1 { self.failure = error }
+                }
+                if let live = self.live { self.liveStatus = live.status }
                 if let error = self.computer?.captureFailure { self.failure = error }
             }
         }
     }
     func stop() async -> (UUID, [String])? {
         guard recording, let id = meetingID else { return nil }
-        timer?.invalidate(); timer = nil; microphone?.stop(); microphone = nil
-        if let live { liveComplete = await live.stop() && liveCoversStart }; live = nil
+        timer?.invalidate(); timer = nil
+        await microphone?.stop(); voicedDuration = microphone?.voicedDuration ?? 0; microphone = nil
+        if let live { liveComplete = await live.stop() }; live = nil
+        if voicedDuration > 10, Double(liveWords) < voicedDuration * 0.5 { liveComplete = false; liveStatus = "Very little speech recognized; checking the saved audio." }
         if let computer { do { try await computer.stop() } catch { failure = error.localizedDescription } }
+        diagnostics = "Input: \(inputName). Duration: \(Int(elapsed))s. Microphone signal: \(Int(voicedDuration))s. Live words: \(liveWords). Live finalized: \(liveComplete). Status: \(liveStatus)."
         self.computer = nil; recording = false; level = 0; meetingID = nil
         return (id, files)
     }
@@ -159,7 +174,7 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate {
         let asset = AVURLAsset(url: url)
         let duration = try await asset.load(.duration).seconds
         guard duration.isFinite, duration > 0 else { throw AppFailure("This audio file is empty or unreadable.") }
-        var tokens: [SpeechToken] = []
+        var text = ""
         let windows = SpeechWindow.plan(duration: duration)
         for (index, window) in windows.enumerated() {
             try Task.checkCancellation()
@@ -173,10 +188,10 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate {
             try Task.checkCancellation()
             guard exporter.status == .completed else { throw exporter.error ?? AppFailure("Could not prepare audio for transcription.") }
             let recognized = try await recognize(temporary, recognizer: recognizer, offset: window.start)
-            tokens += recognized.filter { window.owns($0) }
-            partial(SpeechParagraphs.lines(tokens, source: source, timeOffset: timeOffset))
+            text = TranscriptText.stitch(text, recognized.map(\.text).joined(separator: " "))
+            partial(text.isEmpty ? [] : [TranscriptLine(seconds: timeOffset, source: source, text: text)])
         }
-        return SpeechParagraphs.lines(tokens, source: source, timeOffset: timeOffset)
+        return text.isEmpty ? [] : [TranscriptLine(seconds: timeOffset, source: source, text: text)]
     }
     private func recognize(_ url: URL, recognizer: SFSpeechRecognizer, offset: Double) async throws -> [SpeechToken] {
         let token = UUID()
@@ -194,7 +209,7 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate {
                     Task { @MainActor in
                         guard let self, self.continuation != nil, self.requestID == token else { return }
                         if let result {
-                            self.latestTokens = result.bestTranscription.segments.map { SpeechToken(seconds: offset + $0.timestamp, duration: $0.duration, text: $0.substring) }
+                            self.latestTokens = [SpeechToken(seconds: offset, duration: 0, text: result.bestTranscription.formattedString)]
                             if result.isFinal { self.finish(.success(self.latestTokens)); return }
                         }
                         if let error {

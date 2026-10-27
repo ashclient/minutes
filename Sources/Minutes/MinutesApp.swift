@@ -10,11 +10,11 @@ import AppKit
         Window("Minutes", id: "main") {
             WorkspaceView()
                 .environmentObject(store).environmentObject(recorder).environmentObject(pipeline)
-                .frame(minWidth: 480, minHeight: 400)
+                .frame(minWidth: 560, minHeight: 480)
                 .onAppear { delegate.store = store; delegate.recorder = recorder }
         }
         .windowStyle(.titleBar)
-        .defaultSize(width: 640, height: 580)
+        .defaultSize(width: 740, height: 680)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New note") { store.create() }.keyboardShortcut("n").disabled(store.busy || recorder.recording)

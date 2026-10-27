@@ -27,6 +27,7 @@ struct Meeting: Identifiable, Codable, Equatable {
     var transcribedFiles: [String]? = nil
     var pipelineStatus: String? = nil
     var pipelineError: String? = nil
+    var audioDiagnostics: String? = nil
     var favorite = false
     var trashed = false
     var transcriptText: String { transcript.map { "[\($0.timestamp)] \($0.source): \($0.text)" }.joined(separator: "\n") }
@@ -123,5 +124,40 @@ enum SpeechParagraphs {
             if token.text.hasSuffix(".") || token.text.hasSuffix("?") || token.text.hasSuffix("!") { flush() }
         }
         flush(); return result
+    }
+}
+
+// Recognition text is authoritative; provisional word timings must never delete it.
+enum TranscriptText {
+    static func words(_ text: String) -> [String] { text.split(whereSeparator: \.isWhitespace).map(String.init) }
+    static func key(_ word: String) -> String { word.lowercased().trimmingCharacters(in: .punctuationCharacters) }
+    static func stitch(_ first: String, _ second: String) -> String {
+        let a = words(first), b = words(second)
+        if a.isEmpty { return second }; if b.isEmpty { return first }
+        let ak = a.map(key), bk = b.map(key)
+        if ak == bk { return first }
+        for n in stride(from: min(a.count, b.count, 100), through: 1, by: -1) {
+            if Array(ak.suffix(n)) == Array(bk.prefix(n)), n > 1 || (bk[0].count > 7) {
+                return (a + b.dropFirst(n)).joined(separator: " ")
+            }
+        }
+        return first + " " + second
+    }
+}
+struct LiveTextAccumulator {
+    private(set) var committed = ""
+    private(set) var current = ""
+    var text: String { TranscriptText.stitch(committed, current) }
+    mutating func update(_ next: String) {
+        guard !next.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let a = TranscriptText.words(current).map(TranscriptText.key)
+        let b = TranscriptText.words(next).map(TranscriptText.key)
+        if a.isEmpty { current = next; return }
+        if b.starts(with: a) { current = next; return }
+        // A shorter provisional result must not erase a longer result.
+        if a.starts(with: b) { return }
+        let common = zip(a,b).prefix(while: { $0 == $1 }).count
+        if common >= min(3, min(a.count, b.count)), b.count * 2 >= a.count { current = next; return }
+        committed = TranscriptText.stitch(committed, current); current = next
     }
 }

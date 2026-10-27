@@ -1,7 +1,28 @@
 import XCTest
+import AVFoundation
 @testable import Minutes
 
 final class MinutesTests: XCTestCase {
+    func testAudioSinkPreservesFramesAndFeedsSpeechWithoutMicrophone() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
+        let feed = SpeechFeed()
+        let sink = try MicrophoneSink(url: url, format: format, feed: feed)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4800))
+        buffer.frameLength = 4800
+        for i in 0..<4800 { buffer.floatChannelData![0][i] = Float(sin(Double(i) * 0.08) * 0.3) }
+        for _ in 0..<10 { sink.append(buffer) }
+        await sink.finish()
+        XCTAssertNil(sink.status.1)
+        XCTAssertEqual(feed.receivedSeconds, 1, accuracy: 0.001)
+        let file = try AVAudioFile(forReading: url)
+        XCTAssertEqual(file.length, 48000)
+        let saved = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 48000))
+        try file.read(into: saved)
+        XCTAssertEqual(saved.frameLength, 48000)
+        XCTAssertEqual(saved.floatChannelData![0][100], buffer.floatChannelData![0][100], accuracy: 0.0001)
+    }
     func testArchiveRoundTripPreservesEditsAndTasks() throws {
         var meeting = Meeting()
         meeting.title = "Budget / planning"
