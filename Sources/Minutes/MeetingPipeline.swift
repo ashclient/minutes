@@ -68,12 +68,12 @@ import AVFoundation
             // Do not silently summarize an incomplete capture.
             if let failure = recorder.failure { throw AppFailure(failure + " Your saved tracks are in Details. Retry to process what was captured.") }
             self.canCancel = true
-            try await self.process(id: id, store: store)
+            try await self.process(id: id, store: store, recorder: recorder)
         }
     }
     func resume(id: UUID, store: Store, recorder: Recorder) {
         guard !working, !recorder.recording else { return }
-        run(id: id, store: store, cancel: true) { try await self.process(id: id, store: store) }
+        run(id: id, store: store, cancel: true) { try await self.process(id: id, store: store, recorder: recorder) }
     }
     func retranscribe(id: UUID, store: Store, recorder: Recorder) {
         guard !working, !recorder.recording else { return }
@@ -82,7 +82,7 @@ import AVFoundation
     }
     func cancel() { if canCancel { work?.cancel() } }
 
-    private func process(id: UUID, store: Store) async throws {
+    private func process(id: UUID, store: Store, recorder: Recorder) async throws {
         guard let snapshot = store.meetings.first(where: { $0.id == id }), !snapshot.trashed else { return }
         let legacyTranscript = snapshot.transcribedFiles == nil && !snapshot.transcript.isEmpty
         let done = Set(snapshot.transcribedFiles ?? (legacyTranscript ? snapshot.audioFiles : []))

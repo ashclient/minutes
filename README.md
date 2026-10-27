@@ -1,4 +1,4 @@
-# Minutes 1.2
+# Minutes 1.3
 
 Native Mac meeting and lecture notes. macOS 14 or newer. Download the compiled app from the successful GitHub Actions build, unzip, and move Minutes.app to Applications.
 
@@ -6,7 +6,7 @@ Native Mac meeting and lecture notes. macOS 14 or newer. Download the compiled a
 
 - **New note** (Command-N): create a note without recording. Write in **My notes**; text is saved as you type.
 - **Record**: if the current note has no recording or AI output, recording attaches to it. Otherwise a new meeting is created. You can keep typing in My notes while recording.
-- **Transcript**: shows live on-device Apple recognition of your microphone. Initial recognition permission can take a moment. Live recognition uses overlapping context when requests rotate.
+- **Transcript**: shows live on-device Apple recognition of your microphone. Initial recognition permission can take a moment. Live recognition preserves the recognizer’s formatted text, including when it revises or restarts a phrase. Requests rotate sequentially, buffering incoming audio during the handoff. Provisional word timestamps are never used to discard recognized text.
 - **Stop & make notes**: waits for the microphone transcript to finish, then sends text and your typed notes to OpenRouter for a summary, detailed key points, decisions and next steps. If live recognition is unavailable or incomplete, the saved audio is transcribed first with overlapping windows. Computer audio, if enabled, is transcribed after stopping.
 - **AI notes**: read, copy or edit generated notes. My notes remain separate and editable. To include later changes, use Generate again.
 - **Details**: play recordings, review the transcript, paste transcript text or remove saved audio while retaining text.
@@ -19,7 +19,9 @@ Use Connect AI or the gear button to save an OpenRouter API key in macOS Keychai
 
 ## Recording and speech
 
-Enable Include computer audio in Settings for calls, and wear headphones to avoid duplicated speech. Participants should know you are recording. Speech permissions, supported on-device languages, and input quality affect recognition. You may need to enable Dictation/download a language in macOS Keyboard settings. Live microphone recognition and saved audio capture run separately. On-device speech failures retain audio for retry. Audio source labels are not speaker identification.
+Enable Include computer audio in Settings for calls, and wear headphones to avoid duplicated speech. Participants should know you are recording. Speech permissions, supported on-device languages, and input quality affect recognition. You may need to enable Dictation/download a language in macOS Keyboard settings. A single microphone stream supplies both recording and live speech recognition. New microphone recordings are saved as lossless CAF audio; these can use more disk space and can be removed in Details after transcription. On-device speech failures retain audio for retry. Audio source labels are not speaker identification.
+
+The recording bar shows the microphone level and input device. Details → Recording information shows duration and recognition status, without API keys or transcript content. If active microphone audio produces very few words, the app reports an incomplete transcript rather than silently producing misleading AI notes.
 
 The live transcript is provisional and can change as Apple recognizes more context. It is not guaranteed verbatim. An interrupted live session falls back to saved audio after stopping. Separate audio takes are approximately aligned, not sample synchronized.
 

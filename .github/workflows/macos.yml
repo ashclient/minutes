@@ -19,6 +19,17 @@ jobs:
           lipo dist/Minutes.app/Contents/MacOS/Minutes -verify_arch arm64 x86_64
           codesign --verify --deep --strict dist/Minutes.app
           ditto -c -k --sequesterRsrc --keepParent dist/Minutes.app dist/Minutes-App.zip
+      - name: Capture UI preview
+        continue-on-error: true
+        run: |
+          open dist/Minutes.app
+          sleep 3
+          screencapture -x dist/Minutes-preview.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Minutes-preview
+          path: dist/Minutes-preview.png
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: Minutes-App
