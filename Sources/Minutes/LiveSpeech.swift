@@ -56,6 +56,7 @@ final class SpeechFeed: @unchecked Sendable {
     private var timer: Timer?
     private var stopped = false
     private var failed = false
+    private var lastRotation = Date.distantPast
     private var onText: (([TranscriptLine]) -> Void)?
 
     func prepare() async throws {
@@ -81,6 +82,7 @@ final class SpeechFeed: @unchecked Sendable {
     }
     private func rotate() {
         guard !stopped, let recognizer else { return }
+        lastRotation = Date()
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true; request.shouldReportPartialResults = true
         request.addsPunctuation = true; request.taskHint = .dictation
@@ -98,6 +100,12 @@ final class SpeechFeed: @unchecked Sendable {
                     self.sessions[index].tokens = result.bestTranscription.segments.map { SpeechToken(seconds: base + $0.timestamp, duration: $0.duration, text: $0.substring) }
                     self.sessions[index].final = result.isFinal
                     self.publish()
+                    if result.isFinal, !self.stopped, index == self.sessions.count - 1 {
+                        // An unexpected endpoint may have stopped accepting buffers.
+                        // Continue live where possible and require the saved-audio check.
+                        self.failed = true
+                        if Date().timeIntervalSince(self.lastRotation) > 2 { self.rotate() }
+                    }
                 }
                 if error != nil, !self.sessions[index].final { self.failed = true }
             }
