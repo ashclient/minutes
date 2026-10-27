@@ -24,6 +24,9 @@ import CoreMedia
         guard !recording else { return }
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
         guard granted else { throw AppFailure("Microphone access is off. Enable Minutes in System Settings → Privacy & Security → Microphone.") }
+        let speech = LiveSpeech()
+        var liveAvailable = true
+        do { try await speech.prepare() } catch { liveAvailable = false }
         let stem = "\(id.uuidString)-\(UUID().uuidString)"
         let micName = stem + "-mic.m4a"
         let rec = try AVAudioRecorder(url: directory.appendingPathComponent(micName), settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue])
@@ -45,8 +48,8 @@ import CoreMedia
         if includeComputer { files.append(stem + "-computer.m4a") }
         started = Date(); elapsed = 0; failure = nil; recording = true
         liveComplete = false
-        let speech = LiveSpeech()
         do {
+            guard liveAvailable else { throw AppFailure("Live speech unavailable.") }
             try await speech.start { [weak self] lines in self?.onLiveText?(lines, micName) }
             liveCoversStart = Date().timeIntervalSince(started) < 0.75
             live = speech; liveStatus = "Live microphone transcript"

@@ -58,12 +58,16 @@ final class SpeechFeed: @unchecked Sendable {
     private var failed = false
     private var onText: (([TranscriptLine]) -> Void)?
 
-    func start(onText: @escaping ([TranscriptLine]) -> Void) async throws {
+    func prepare() async throws {
         let permission = await withCheckedContinuation { c in SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) } }
         guard permission == .authorized else { throw AppFailure("Live speech permission is unavailable.") }
         let locale = UserDefaults.standard.string(forKey: "speechLocale") ?? "en-US"
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale)), recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { throw AppFailure("Live on-device speech is unavailable for this language.") }
-        self.recognizer = recognizer; self.onText = onText
+        self.recognizer = recognizer
+    }
+    func start(onText: @escaping ([TranscriptLine]) -> Void) async throws {
+        if recognizer == nil { try await prepare() }
+        self.onText = onText
         let input = engine.inputNode; let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw AppFailure("No microphone input for live transcription.") }
         rotate()
