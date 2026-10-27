@@ -34,16 +34,6 @@ import CoreMedia
         let micName = stem + "-mic.caf"
         let rec = MicrophoneCapture()
         liveStatus = "Live microphone transcript"
-        if liveAvailable {
-            do {
-                try await speech.start { [weak self] lines in
-                    self?.liveWords = lines.map(\.text).joined(separator: " ").split(whereSeparator: \.isWhitespace).count
-                    self?.onLiveText?(lines, micName)
-                }
-                live = speech
-            } catch { liveAvailable = false; liveStatus = error.localizedDescription }
-        }
-        if !liveAvailable { liveStatus = "Live speech unavailable; saved audio will be transcribed after stopping." }
         var system: ComputerAudio?
         do {
             if includeComputer {
@@ -51,6 +41,16 @@ import CoreMedia
                 try await capture.start(url: directory.appendingPathComponent(stem + "-computer.m4a"))
                 system = capture
             }
+            if liveAvailable {
+                do {
+                    try await speech.start { [weak self] lines in
+                        self?.liveWords = lines.map(\.text).joined(separator: " ").split(whereSeparator: \.isWhitespace).count
+                        self?.onLiveText?(lines, micName)
+                    }
+                    live = speech
+                } catch { liveAvailable = false; liveStatus = error.localizedDescription }
+            }
+            if !liveAvailable { liveStatus = "Live speech unavailable; saved audio will be transcribed after stopping." }
             try rec.start(url: directory.appendingPathComponent(micName), feed: speech.feed)
         } catch {
             if let live { _ = await live.stop() }; live = nil
@@ -161,6 +161,7 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate {
     private var task: SFSpeechRecognitionTask?
     private var continuation: CheckedContinuation<[SpeechToken], Error>?
     private var latestTokens: [SpeechToken] = []
+    private var textAccumulator = LiveTextAccumulator()
     private var timeout: Task<Void, Never>?
     private var requestID: UUID?
 
@@ -204,12 +205,13 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate {
                 if Task.isCancelled { continuation.resume(throwing: CancellationError()); return }
                 self.continuation = continuation
                 self.requestID = token
-                self.latestTokens = []
+                self.latestTokens = []; self.textAccumulator = LiveTextAccumulator()
                 task = recognizer.recognitionTask(with: request) { [weak self] result, error in
                     Task { @MainActor in
                         guard let self, self.continuation != nil, self.requestID == token else { return }
                         if let result {
-                            self.latestTokens = [SpeechToken(seconds: offset, duration: 0, text: result.bestTranscription.formattedString)]
+                            self.textAccumulator.update(result.bestTranscription.formattedString)
+                            self.latestTokens = [SpeechToken(seconds: offset, duration: 0, text: self.textAccumulator.text)]
                             if result.isFinal { self.finish(.success(self.latestTokens)); return }
                         }
                         if let error {
