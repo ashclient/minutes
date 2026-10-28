@@ -8,19 +8,27 @@ final class MicrophoneSink: @unchecked Sendable {
     private var file: AVAudioFile?
     private var accepting = true
     private var pending = 0
+    private var paused = false
+    private var muted = false
     private var signal: Float = 0
     private var voiceFrames = 0.0
     var voicedDuration: Double { lock.lock(); defer { lock.unlock() }; return voiceFrames }
     private var errorText: String?
     private let feed: SpeechFeed
     var status: (Float, String?) { lock.lock(); defer { lock.unlock() }; return (signal, errorText) }
+    func setGate(paused: Bool, muted: Bool) {
+        lock.lock(); self.paused = paused; self.muted = muted
+        if paused || muted { signal = 0 }
+        lock.unlock()
+    }
     init(url: URL, format: AVAudioFormat, feed: SpeechFeed) throws {
         self.feed = feed
         file = try AVAudioFile(forWriting: url, settings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: format.sampleRate, AVNumberOfChannelsKey: Int(format.channelCount), AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false], commonFormat: format.commonFormat, interleaved: format.isInterleaved)
     }
     func append(_ buffer: AVAudioPCMBuffer) {
         lock.lock()
-        guard accepting else { lock.unlock(); return }
+        guard accepting, !paused else { lock.unlock(); return }
+        let silenced = muted
         guard pending < 256 else { errorText = "Audio processing could not keep up. Stop and check this recording."; lock.unlock(); return }
         pending += 1; lock.unlock()
         guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else {
@@ -29,12 +37,19 @@ final class MicrophoneSink: @unchecked Sendable {
         copy.frameLength = buffer.frameLength
         let src = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffer.audioBufferList))
         let dst = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
-        for i in src.indices { if let from = src[i].mData, let to = dst[i].mData { memcpy(to, from, Int(src[i].mDataByteSize)) } }
+        for i in src.indices {
+            if let from = src[i].mData, let to = dst[i].mData {
+                if silenced { memset(to, 0, Int(src[i].mDataByteSize)) }
+                else { memcpy(to, from, Int(src[i].mDataByteSize)) }
+            }
+        }
         var level: Float = 0
-        if let floats = buffer.floatChannelData, buffer.frameLength > 0 {
+        if !silenced, let floats = copy.floatChannelData, copy.frameLength > 0 {
             var squares: Float = 0
-            for i in 0..<Int(buffer.frameLength) { squares += floats[0][i] * floats[0][i] }
-            level = min(1, sqrt(squares / Float(buffer.frameLength)) * 5)
+            let channels = copy.format.isInterleaved ? 1 : Int(copy.format.channelCount)
+            let samples = Int(copy.frameLength) * (copy.format.isInterleaved ? Int(copy.format.channelCount) : 1)
+            for ch in 0..<channels { for i in 0..<samples { squares += floats[ch][i] * floats[ch][i] } }
+            level = min(1, sqrt(squares / Float(samples * channels)) * 5)
         }
         lock.lock(); signal = level
         if level > 0.08 { voiceFrames += Double(buffer.frameLength) / buffer.format.sampleRate }
@@ -56,6 +71,7 @@ final class MicrophoneSink: @unchecked Sendable {
 @MainActor final class MicrophoneCapture {
     private let engine = AVAudioEngine()
     private var sink: MicrophoneSink?
+    func setGate(paused: Bool, muted: Bool) { sink?.setGate(paused: paused, muted: muted) }
     var voicedDuration: Double { sink?.voicedDuration ?? 0 }
     var status: (Float, String?) {
         guard engine.isRunning else { return (0, "Microphone input stopped. Stop recording and check macOS Sound → Input.") }

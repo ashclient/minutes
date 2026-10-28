@@ -28,6 +28,15 @@ struct Meeting: Identifiable, Codable, Equatable {
     var pipelineStatus: String? = nil
     var pipelineError: String? = nil
     var audioDiagnostics: String? = nil
+    var calendarEventKey: String? = nil
+    var eventStart: Date? = nil
+    var eventEnd: Date? = nil
+    var eventCalendar: String? = nil
+    var notionPageID: String? = nil
+    var notionURL: String? = nil
+    var notionBlockID: String? = nil
+    var notionSyncedAt: Date? = nil
+    var notionError: String? = nil
     var favorite = false
     var trashed = false
     var transcriptText: String { transcript.map { "[\($0.timestamp)] \($0.source): \($0.text)" }.joined(separator: "\n") }
@@ -39,6 +48,13 @@ struct Meeting: Identifiable, Codable, Equatable {
 struct Archive: Codable {
     var version = 1
     var meetings: [Meeting]
+}
+enum RecordingTrack {
+    static func source(_ file: String) -> String {
+        if file.hasSuffix("-computer.m4a") || file.hasSuffix("-computer.caf") { return "Computer" }
+        if file.hasSuffix("-mic.m4a") || file.hasSuffix("-mic.caf") { return "Microphone" }
+        return "Recording"
+    }
 }
 struct SummaryResult: Codable {
     var title: String? = nil

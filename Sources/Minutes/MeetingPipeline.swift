@@ -55,14 +55,14 @@ import AVFoundation
     }
     func stop(store: Store, recorder: Recorder) {
         guard !working, let id = recorder.meetingID else { return }
-        store.selectedID = id
         run(id: id, store: store, cancel: false) {
             self.state("saving", "Saving recording…", id: id, store: store)
             _ = await recorder.stop()
             recorder.onLiveText = nil
-            store.update(id) { $0.audioDiagnostics = recorder.diagnostics }
-            if recorder.liveComplete, let file = recorder.files.first {
-                store.update(id) { $0.transcribedFiles = [file] }
+            store.update(id) {
+                $0.audioDiagnostics = recorder.diagnostics
+                $0.audioFiles = recorder.files
+                $0.transcribedFiles = recorder.completedFiles
             }
             store.saveNow()
             // Do not silently summarize an incomplete capture.
@@ -103,7 +103,7 @@ import AVFoundation
             for file in pending {
                 try Task.checkCancellation()
                 guard let url = store.audioURL(file) else { throw AppFailure("A recording path is invalid.") }
-                let source = (file.hasSuffix("-mic.m4a") || file.hasSuffix("-mic.caf")) ? "Microphone" : (file.hasSuffix("-computer.m4a") ? "Computer" : "Recording")
+                let source = RecordingTrack.source(file)
                 let persist: ([TranscriptLine]) -> Void = { lines in
                     var tagged = lines
                     for i in tagged.indices { tagged[i].audioFile = file }
@@ -149,11 +149,13 @@ import AVFoundation
         try Task.checkCancellation()
         store.update(id) { $0.apply(result, originalTitle: meeting.title) }
         stage = "ready"; message = "Notes ready"
+        if UserDefaults.standard.bool(forKey: "notionAutoSync") { await NotionSync.shared.sync(id: id, store: store) }
     }
     static func group(_ file: String) -> String {
         if file.hasSuffix("-mic.m4a") { return String(file.dropLast(8)) }
         if file.hasSuffix("-mic.caf") { return String(file.dropLast(8)) }
         if file.hasSuffix("-computer.m4a") { return String(file.dropLast(13)) }
+        if file.hasSuffix("-computer.caf") { return String(file.dropLast(13)) }
         return file
     }
 }

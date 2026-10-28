@@ -1,159 +1,124 @@
 import AVFoundation
 import Speech
-import ScreenCaptureKit
 import CoreMedia
 
 @MainActor final class Recorder: ObservableObject {
-    @Published var recording = false
-    @Published var elapsed: TimeInterval = 0
-    @Published var level: Float = 0
+    @Published private(set) var recording = false
+    @Published private(set) var paused = false
+    @Published private(set) var microphoneMuted = false
+    @Published private(set) var computerEnabled = false
+    @Published private(set) var elapsed: TimeInterval = 0
+    @Published private(set) var level: Float = 0
+    @Published private(set) var computerLevel: Float = 0
     @Published var failure: String?
-    @Published var liveStatus = ""
+    @Published private(set) var liveStatus = ""
+    @Published private(set) var computerStatus = "Off"
+    @Published private(set) var inputName = "System microphone"
+    @Published private(set) var meetingID: UUID?
     var onLiveText: (([TranscriptLine], String) -> Void)?
     private var live: LiveSpeech?
-    private(set) var liveComplete = false
+    private var computerSpeech: LiveSpeech?
     private var microphone: MicrophoneCapture?
-    @Published var inputName = "System microphone"
-    private(set) var diagnostics = ""
-    private(set) var voicedDuration = 0.0
-    private var liveWords = 0
     private var computer: ComputerAudio?
     private var timer: Timer?
-    private var started = Date()
-    private(set) var meetingID: UUID?
+    private var lastTick = Date()
+    private var micName = ""
+    private var computerName = ""
+    private var liveWords = 0
+    private(set) var completedFiles: [String] = []
+    private(set) var diagnostics = ""
+    private(set) var voicedDuration = 0.0
     private(set) var files: [String] = []
 
     func start(id: UUID, directory: URL, includeComputer: Bool) async throws {
         guard !recording else { return }
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
         guard granted else { throw AppFailure("Microphone access is off. Enable Minutes in System Settings → Privacy & Security → Microphone.") }
-        let speech = LiveSpeech()
-        var liveAvailable = true
-        do { try await speech.prepare() } catch { liveAvailable = false }
+        paused = false; microphoneMuted = false; computerEnabled = includeComputer
+        completedFiles = []; liveWords = 0; voicedDuration = 0; elapsed = 0; failure = nil
         let stem = "\(id.uuidString)-\(UUID().uuidString)"
-        let micName = stem + "-mic.caf"
-        let rec = MicrophoneCapture()
-        liveStatus = "Live microphone transcript"
+        micName = stem + "-mic.caf"; computerName = stem + "-computer.caf"
+        let microphoneSpeech = LiveSpeech()
+        let mic = MicrophoneCapture()
         var system: ComputerAudio?
         do {
+            do {
+                try await microphoneSpeech.prepare()
+                try await microphoneSpeech.start { [weak self] lines in
+                    guard let self else { return }
+                    self.liveWords = lines.map(\.text).joined(separator: " ").split(whereSeparator: \.isWhitespace).count
+                    self.onLiveText?(lines, self.micName)
+                }
+                live = microphoneSpeech; liveStatus = microphoneSpeech.status
+            } catch { liveStatus = "Live microphone speech unavailable; saved audio will be transcribed after stopping." }
             if includeComputer {
+                let speech = LiveSpeech(source: "Computer")
+                do {
+                    try await speech.prepare()
+                    try await speech.start { [weak self] lines in
+                        guard let self else { return }; self.onLiveText?(lines, self.computerName)
+                    }
+                    computerSpeech = speech
+                } catch { computerStatus = "Live computer speech unavailable; transcribing after stopping." }
                 let capture = ComputerAudio()
-                try await capture.start(url: directory.appendingPathComponent(stem + "-computer.m4a"))
+                do { try await capture.start(url: directory.appendingPathComponent(computerName), feed: speech.feed) }
+                catch { throw AppFailure("Computer audio could not start: \(error.localizedDescription). Allow Minutes in macOS Privacy & Security → Screen & System Audio Recording, then try again.") }
                 system = capture
             }
-            if liveAvailable {
-                do {
-                    try await speech.start { [weak self] lines in
-                        self?.liveWords = lines.map(\.text).joined(separator: " ").split(whereSeparator: \.isWhitespace).count
-                        self?.onLiveText?(lines, micName)
-                    }
-                    live = speech
-                } catch { liveAvailable = false; liveStatus = error.localizedDescription }
-            }
-            if !liveAvailable { liveStatus = "Live speech unavailable; saved audio will be transcribed after stopping." }
-            try rec.start(url: directory.appendingPathComponent(micName), feed: speech.feed)
+            try mic.start(url: directory.appendingPathComponent(micName), feed: microphoneSpeech.feed)
         } catch {
             if let live { _ = await live.stop() }; live = nil
+            if let computerSpeech { _ = await computerSpeech.stop() }; computerSpeech = nil
             if let system { try? await system.stop() }
-            try? FileManager.default.removeItem(at: directory.appendingPathComponent(micName))
+            for name in [micName, computerName] { try? FileManager.default.removeItem(at: directory.appendingPathComponent(name)) }
             throw error
         }
-        microphone = rec; computer = system; meetingID = id; files = [micName]
-        if includeComputer { files.append(stem + "-computer.m4a") }
-        started = Date(); elapsed = 0; failure = nil; recording = true
-        liveComplete = false; liveWords = 0; voicedDuration = 0
+        microphone = mic; computer = system; meetingID = id; files = [micName]
+        if includeComputer { files.append(computerName); computerStatus = "Waiting for computer audio" }
+        recording = true; lastTick = Date()
         inputName = AVCaptureDevice.default(for: .audio)?.localizedName ?? "System microphone"
-        timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.elapsed = Date().timeIntervalSince(self.started)
-                if let microphone = self.microphone {
-                    let status = microphone.status
-                    self.level = status.0
-                    if let error = status.1 { self.failure = error }
-                }
-                if let live = self.live { self.liveStatus = live.status }
-                if let error = self.computer?.captureFailure { self.failure = error }
-            }
+        timer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.tick() }
         }
+    }
+    private func tick() {
+        let now = Date()
+        if !paused { elapsed += now.timeIntervalSince(lastTick) }; lastTick = now
+        if let mic = microphone {
+            let state = mic.status; level = paused || microphoneMuted ? 0 : state.0
+            if let error = state.1 { failure = error }
+        }
+        if let live { liveStatus = live.status }
+        if let computer {
+            let state = computer.status; computerLevel = paused ? 0 : state.0
+            computerStatus = state.2 > 0 ? (state.0 > 0.015 ? "Receiving computer audio" : "Connected · quiet") : "Waiting for computer audio"
+            if let error = state.1 { failure = error; computerStatus = error }
+        }
+    }
+    func toggleMicrophone() {
+        guard recording else { return }; microphoneMuted.toggle()
+        microphone?.setGate(paused: paused, muted: microphoneMuted)
+        if microphoneMuted { level = 0 }
+    }
+    func togglePause() {
+        guard recording else { return }; tick(); paused.toggle()
+        microphone?.setGate(paused: paused, muted: microphoneMuted)
+        computer?.setPaused(paused)
+        if paused { level = 0; computerLevel = 0 }
     }
     func stop() async -> (UUID, [String])? {
         guard recording, let id = meetingID else { return nil }
-        timer?.invalidate(); timer = nil
+        tick(); timer?.invalidate(); timer = nil
         await microphone?.stop(); voicedDuration = microphone?.voicedDuration ?? 0; microphone = nil
-        if let live { liveComplete = await live.stop() }; live = nil
-        if voicedDuration > 10, Double(liveWords) < voicedDuration * 0.5 { liveComplete = false; liveStatus = "Very little speech recognized; checking the saved audio." }
         if let computer { do { try await computer.stop() } catch { failure = error.localizedDescription } }
-        diagnostics = "Input: \(inputName). Duration: \(Int(elapsed))s. Microphone signal: \(Int(voicedDuration))s. Live words: \(liveWords). Live finalized: \(liveComplete). Status: \(liveStatus)."
-        self.computer = nil; recording = false; level = 0; meetingID = nil
+        if let live, await live.stop(), !(voicedDuration > 10 && Double(liveWords) < voicedDuration * 0.5) { completedFiles.append(micName) }
+        if let computerSpeech, await computerSpeech.stop() { completedFiles.append(computerName) }
+        // An idle source may deliver no buffers at all. Never hand a missing file to transcription.
+        if let computer, !computer.hasFrames { files.removeAll { $0 == computerName }; completedFiles.removeAll { $0 == computerName } }
+        diagnostics = "Input: \(inputName). Duration: \(Int(elapsed))s. Microphone signal: \(Int(voicedDuration))s. Microphone words: \(liveWords). Computer: \(computerEnabled ? computerStatus : "Off")."
+        live = nil; computerSpeech = nil; computer = nil
+        recording = false; paused = false; level = 0; computerLevel = 0; meetingID = nil
         return (id, files)
-    }
-}
-
-// Audio buffers are serialized on queue; only audio is written to disk.
-final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate {
-    private let queue = DispatchQueue(label: "Minutes.computer-audio")
-    private var stream: SCStream?
-    private var writer: AVAssetWriter?
-    private var input: AVAssetWriterInput?
-    private let lock = NSLock()
-    private var failure: String?
-    var captureFailure: String? { lock.lock(); defer { lock.unlock() }; return failure }
-    private func fail(_ text: String) { lock.lock(); failure = text; lock.unlock() }
-
-    func start(url: URL) async throws {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let display = content.displays.first else { throw AppFailure("No display available for computer audio capture.") }
-        let config = SCStreamConfiguration()
-        config.width = 2; config.height = 2; config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-        config.capturesAudio = true; config.excludesCurrentProcessAudio = true
-        config.sampleRate = 48000; config.channelCount = 2
-        let writer = try AVAssetWriter(outputURL: url, fileType: .m4a)
-        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48000, AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 128000])
-        input.expectsMediaDataInRealTime = true
-        guard writer.canAdd(input) else { throw AppFailure("Could not configure computer audio recording.") }
-        writer.add(input); self.writer = writer; self.input = input
-        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-        let stream = SCStream(filter: filter, configuration: config, delegate: self)
-        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
-        self.stream = stream
-        try await stream.startCapture()
-    }
-    func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .audio, CMSampleBufferDataIsReady(buffer), let writer, let input else { return }
-        if writer.status == .unknown {
-            guard writer.startWriting() else { fail(writer.error?.localizedDescription ?? "Computer audio could not start writing."); return }
-            writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(buffer))
-        }
-        if writer.status == .writing, input.isReadyForMoreMediaData {
-            if !input.append(buffer) { fail(writer.error?.localizedDescription ?? "A computer audio buffer could not be saved.") }
-        } else if writer.status == .failed { fail(writer.error?.localizedDescription ?? "Computer audio capture failed.") }
-        else if writer.status == .writing { fail("Computer audio storage could not keep up. The recording may have gaps.") }
-    }
-    func stream(_ stream: SCStream, didStopWithError error: Error) { fail(error.localizedDescription) }
-    func stop() async throws {
-        var stopError: Error?
-        do { try await stream?.stopCapture() } catch { stopError = error }
-        stream = nil
-        let outputWriter = writer
-        let outputInput = input
-        let currentFailure = captureFailure
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            queue.async {
-                guard let writer = outputWriter, let input = outputInput else { continuation.resume(); return }
-                guard writer.status == .writing else {
-                    writer.cancelWriting()
-                    continuation.resume(throwing: AppFailure(currentFailure ?? "No computer audio was captured. The microphone recording is still saved.")); return
-                }
-                input.markAsFinished()
-                writer.finishWriting {
-                    if writer.status == .completed { continuation.resume() }
-                    else { continuation.resume(throwing: writer.error ?? AppFailure("Could not finish computer audio.")) }
-                }
-            }
-        }
-        if let stopError { throw stopError }
-        if let error = captureFailure { throw AppFailure(error) }
     }
 }
 

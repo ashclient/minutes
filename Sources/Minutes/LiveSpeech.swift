@@ -32,6 +32,8 @@ final class SpeechFeed: @unchecked Sendable {
 
 @MainActor final class LiveSpeech {
     let feed = SpeechFeed()
+    private let source: String
+    init(source: String = "Microphone") { self.source = source }
     private var modern: AnyObject?
     private var recognizer: SFSpeechRecognizer?
     private var task: SFSpeechRecognitionTask?
@@ -61,7 +63,7 @@ final class SpeechFeed: @unchecked Sendable {
     func start(onText: @escaping ([TranscriptLine]) -> Void) async throws {
         if recognizer == nil && modern == nil { try await prepare() }
         if #available(macOS 26.0, *), let modern = modern as? TahoeSpeech {
-            try await modern.start(feed: feed, onText: onText)
+            try await modern.start(feed: feed, source: source, onText: onText)
             return
         }
         self.onText = onText; begin(since: 0)
@@ -108,7 +110,7 @@ final class SpeechFeed: @unchecked Sendable {
     }
     private func publish() {
         let text = TranscriptText.stitch(completed, current.text)
-        onText?(text.isEmpty ? [] : [TranscriptLine(seconds: 0, source: "Microphone", text: text)])
+        onText?(text.isEmpty ? [] : [TranscriptLine(seconds: 0, source: source, text: text)])
     }
     func stop() async -> Bool {
         if #available(macOS 26.0, *), let modern = modern as? TahoeSpeech {

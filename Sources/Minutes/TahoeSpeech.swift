@@ -50,10 +50,10 @@ struct CapturedPCM: @unchecked Sendable { let buffer: AVAudioPCMBuffer }
         if !volatile.isEmpty { lines.append(TranscriptLine(seconds: finalized.last?.seconds ?? timeOffset, source: source, text: volatile)) }
         onText?(lines)
     }
-    func start(feed: SpeechFeed, onText: @escaping ([TranscriptLine]) -> Void) async throws {
+    func start(feed: SpeechFeed, source: String = "Microphone", onText: @escaping ([TranscriptLine]) -> Void) async throws {
         guard let analyzer, let module else { throw AppFailure("Apple speech was not prepared.") }
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module]) else { throw AppFailure("Apple speech language assets are not ready. Check your network and try again.") }
-        self.onText = onText
+        self.onText = onText; self.source = source
         try collect()
         let (audio, builder) = AsyncStream<CapturedPCM>.makeStream()
         continuation = builder

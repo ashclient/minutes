@@ -5,32 +5,35 @@ import AppKit
     @StateObject private var store = Store()
     @StateObject private var recorder = Recorder()
     @StateObject private var pipeline = MeetingPipeline()
+    @StateObject private var calendar = CalendarMeetings()
+    init() { UserDefaults.standard.register(defaults: ["includeComputer": true, "notionAutoSync": true]) }
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     var body: some Scene {
         Window("Minutes", id: "main") {
             WorkspaceView()
-                .environmentObject(store).environmentObject(recorder).environmentObject(pipeline)
-                .frame(minWidth: 560, minHeight: 480)
-                .onAppear { delegate.store = store; delegate.recorder = recorder }
+                .environmentObject(store).environmentObject(recorder).environmentObject(pipeline).environmentObject(calendar)
+                .frame(minWidth: 850, minHeight: 560)
+                .onAppear { delegate.store = store; delegate.recorder = recorder; delegate.floating.configure(store: store, recorder: recorder, pipeline: pipeline) }
         }
         .windowStyle(.titleBar)
-        .defaultSize(width: 740, height: 680)
+        .defaultSize(width: 1080, height: 760)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New note") { store.create() }.keyboardShortcut("n").disabled(store.busy || recorder.recording)
-                Button("Import notes or backup…") { store.importText() }.keyboardShortcut("o").disabled(store.busy || recorder.recording)
+                Button("New note") { store.create() }.keyboardShortcut("n")
+                Button("Import notes or backup…") { store.importText() }.keyboardShortcut("o")
                 Button("Export text backup…") { store.export() }.keyboardShortcut("s", modifiers: [.command, .shift])
             }
             CommandGroup(after: .help) {
                 Button("Minutes guide") { NSWorkspace.shared.open(Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/Guide.html")) }
             }
         }
-        Settings { SettingsView() }
+        Settings { AppSettingsView(initialTab: "General").environmentObject(calendar) }
     }
 }
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var store: Store?
     weak var recorder: Recorder?
+    let floating = FloatingRecorder()
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if recorder?.recording == true {

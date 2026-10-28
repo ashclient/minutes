@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.4.0</string>
+	<string>1.5.0</string>
 	<key>CFBundleVersion</key>
-	<string>6</string>
+	<string>7</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSAppTransportSecurity</key>
@@ -31,6 +31,8 @@
 	<string>© 2026 Minutes contributors. MIT License.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Minutes records your microphone when you start a meeting. Audio is saved on this Mac.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Minutes reads upcoming calendar events so you can open meeting notes with the event’s name and date. It does not change your calendar events.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSScreenCaptureUsageDescription</key>
