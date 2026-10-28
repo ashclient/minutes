@@ -36,7 +36,8 @@ final class MinutesTests: XCTestCase {
             XCTAssertEqual(converted.format, target)
             count += converted.frameLength
         }
-        XCTAssertEqual(Double(count), 16000, accuracy: 64)
+        for tail in try converter.finish() { count += tail.frameLength }
+        XCTAssertEqual(Double(count), 16000, accuracy: 2)
     }
     func testArchiveRoundTripPreservesEditsAndTasks() throws {
         var meeting = Meeting()

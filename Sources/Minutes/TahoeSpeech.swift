@@ -67,6 +67,7 @@ struct CapturedPCM: @unchecked Sendable { let buffer: AVAudioPCMBuffer }
                     let buffer = try conversion.convert(packet.buffer)
                     if buffer.frameLength > 0 { inputBuilder.yield(AnalyzerInput(buffer: buffer)) }
                 }
+                for buffer in try conversion.finish() { inputBuilder.yield(AnalyzerInput(buffer: buffer)) }
                 inputBuilder.finish()
             } catch {
                 failure = error.localizedDescription; inputBuilder.finish(); throw error
@@ -135,5 +136,20 @@ final class SpeechPCMConverter {
         }
         if status == .error { throw error ?? AppFailure("Audio conversion failed.") }
         return output
+    }
+    func finish() throws -> [AVAudioPCMBuffer] {
+        guard let converter else { return [] }
+        var buffers: [AVAudioPCMBuffer] = []
+        while true {
+            guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 4096) else { throw AppFailure("Could not finish audio conversion.") }
+            var error: NSError?
+            let status = converter.convert(to: output, error: &error) { _, state in
+                state.pointee = .endOfStream; return nil
+            }
+            if status == .error { throw error ?? AppFailure("Could not finish audio conversion.") }
+            if output.frameLength > 0 { buffers.append(output) }
+            if status == .endOfStream || output.frameLength == 0 { break }
+        }
+        return buffers
     }
 }
