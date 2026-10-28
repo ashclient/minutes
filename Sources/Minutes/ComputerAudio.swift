@@ -40,8 +40,8 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
     }
     // Kept separate so PCM extraction can be tested without screen/microphone permission.
     static func pcm(from sample: CMSampleBuffer) throws -> AVAudioPCMBuffer {
-        guard CMSampleBufferDataIsReady(sample), let description = CMSampleBufferGetFormatDescription(sample),
-              let format = AVAudioFormat(cmAudioFormatDescription: description) else { throw AppFailure("Computer audio arrived in an unreadable format.") }
+        guard CMSampleBufferDataIsReady(sample), let description = CMSampleBufferGetFormatDescription(sample), CMFormatDescriptionGetMediaType(description) == kCMMediaType_Audio else { throw AppFailure("Computer audio arrived in an unreadable format.") }
+        let format = AVAudioFormat(cmAudioFormatDescription: description)
         let count = CMSampleBufferGetNumSamples(sample)
         guard count > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)) else { throw AppFailure("Could not allocate computer audio.") }
         buffer.frameLength = AVAudioFrameCount(count)

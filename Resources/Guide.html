@@ -1,37 +1,44 @@
-<!doctype html><meta charset="utf-8"><title>Minutes guide</title><style>body{max-width:760px;margin:40px auto;font:14px/1.6 system-ui;padding:24px}pre{white-space:pre-wrap}</style><pre># Minutes 1.4
+<!doctype html><meta charset="utf-8"><title>Minutes guide</title><style>body{max-width:760px;margin:40px auto;font:14px/1.6 system-ui;padding:24px}pre{white-space:pre-wrap}</style><pre># Minutes 1.5
 
-Native Mac meeting and lecture notes. macOS 14 or newer. Download the compiled app from the successful GitHub Actions build, unzip, and move Minutes.app to Applications.
+A native Mac app for meeting and lecture notes. macOS 14 or newer; the direct long-form Apple transcription engine requires macOS Tahoe 26 and supported hardware.
 
-## Use
+## Workspace
 
-- **New note** (Command-N): create a note without recording. Write in **My notes**; text is saved as you type.
-- **Record**: if the current note has no recording or AI output, recording attaches to it. Otherwise a new meeting is created. You can keep typing in My notes while recording.
-- **Transcript**: shows live on-device Apple recognition of your microphone. Initial recognition permission can take a moment. On macOS Tahoe 26, SpeechAnalyzer and Apple SpeechTranscriber perform continuous live and whole-file transcription directly. They provide finalized results and separate provisional updates; there are no 45-second dictation resets or custom word-timestamp filters on this path. Apple may need to install system-managed language assets once. macOS 14/15 retain the legacy path.
+The sidebar holds searchable notes, favorites, trash, and upcoming calendar events. Command-N makes a blank note. Select a meeting, then use Notes, AI notes, or Transcript. Your own notes save as you type, including during recording. Navigation, settings, imports, exports, and editing remain available while recording; removing or reprocessing the active capture is protected.
 
-Legacy live recognition preserves the recognizer’s formatted text, including when it revises or restarts a phrase. Requests rotate sequentially, buffering incoming audio during the handoff. Provisional word timestamps are never used to discard recognized text.
-- **Stop &amp; make notes**: waits for the microphone transcript to finish, then sends text and your typed notes to OpenRouter for a summary, detailed key points, decisions and next steps. If live recognition is unavailable or incomplete, the saved audio is transcribed first with overlapping windows. Computer audio, if enabled, is transcribed after stopping.
-- **AI notes**: read, copy or edit generated notes. My notes remain separate and editable. To include later changes, use Generate again.
-- **Details**: play recordings, review the transcript, paste transcript text or remove saved audio while retaining text.
-- **Three-dot menu → Transcribe again**: refresh an existing recording&#x27;s transcript and AI notes. Typed notes and audio are kept. Useful for recordings made with older versions.
-- **History**: search or reopen notes. Trash supports restore and confirmed permanent deletion.
+Expand Recordings inside a note for playback, seeking, duration, and playback speed. Tracks are labeled Microphone or Computer. Separate tracks play independently.
 
-## One-time AI setup
+## Recording
 
-Use Connect AI or the gear button to save an OpenRouter API key in macOS Keychain. Default model: `openrouter/free`, automatically routed to an available free model supporting JSON. No local language model is needed; free usage limits and availability apply. There is no paid fallback. No meeting text is sent to AI while recording: it is sent after stopping or when you explicitly make/regenerate notes. OpenRouter and its selected provider receive text, not audio. The old Groq key is not reused.
+Choose Microphone or Mic + computer beside Record meeting. The current empty note is used; if it already has recorded audio or AI output, a new meeting is created. Source changes in Settings apply to the next recording.
 
-## Recording and speech
+Both enabled sources have independent live Apple transcription feeds, meters, and transcript labels. Computer audio comes directly from ScreenCaptureKit and is not derived from the microphone. System audio permission must be allowed in macOS Privacy &amp; Security → Screen &amp; System Audio Recording. Protected or nonplaying media may supply no audio. To verify system capture, play normal speech in another app, mute the microphone using Minutes, and check the Computer meter and Computer-labeled transcript, including with the Mac output muted. Use headphones when both sources are on to avoid microphone pickup of speakers.
 
-Enable Include computer audio in Settings for calls, and wear headphones to avoid duplicated speech. Participants should know you are recording. Speech permissions, supported on-device languages, and input quality affect recognition. You may need to enable Dictation/download a language in macOS Keyboard settings. A single microphone stream supplies both recording and live speech recognition. New microphone recordings are saved as lossless CAF audio; these can use more disk space and can be removed in Details after transcription. On-device speech failures retain audio for retry. Audio source labels are not speaker identification.
+The recording controls mute only the microphone, pause/resume both sources, or stop and make notes. Microphone mute writes silence to that track and speech feed. Pause omits incoming audio from both files and speech feeds, and stops the elapsed timer. Audio immediately before a control press can still finish transcribing. Switching to another app or minimizing Minutes shows a draggable floating control panel that does not steal focus; its arrow returns to the recording. You can browse other notes while recording.
 
-The recording bar shows the microphone level and input device. Details → Recording information shows duration and recognition status, without API keys or transcript content. If active microphone audio produces very few words, the app reports an incomplete transcript rather than silently producing misleading AI notes.
+Tahoe uses SpeechAnalyzer and Apple&#x27;s SpeechTranscriber continuously for live and saved audio. Language assets may be installed once by macOS. On older systems the legacy recognizer is retained. New mic and computer tracks use lossless CAF files. They take disk space; remove saved recordings in Details after use if desired. If live recognition fails, the saved track is retried after stopping. Source labels are not speaker identification. Track clocks are approximate, not sample synchronized.
 
-The live transcript is provisional and can change as Apple recognizes more context. It is not guaranteed verbatim. An interrupted live session falls back to saved audio after stopping. Separate audio takes are approximately aligned, not sample synchronized.
+## AI notes
 
-## Data and building
+In Settings → General, save an OpenRouter key in macOS Keychain. The default `openrouter/free` router chooses an available free model. Free limits and availability apply. No local third-party language model is installed. After stopping, your transcript and own notes are sent as text to OpenRouter and its selected provider; audio stays on the Mac. AI notes can be copied, edited, regenerated, or exported. Transcribe again uses saved audio while preserving typed notes.
 
-Notes/recordings remain in `~/Library/Application Support/Minutes`; replacing the app preserves them. Copy the whole folder while the app is closed for a full backup. JSON exports omit audio. Saved audio is not automatically deleted.
+## Calendar and Notion
 
-`bash build.command` runs standalone checks using Apple Command Line Tools, then builds the app. Full-Xcode users can additionally set `MINUTES_RUN_TESTS=1`. CI runs both core and XCTest checks, compiles arm64 and x86_64, verifies the ad-hoc signature and packages the app. A Developer ID/notarized public installer is not provided.
+Open Connections in the sidebar.
 
-Native compilation, core checks and XCTest passed on the macOS runner for this update. Live microphone, speech quality and real API behavior still require testing on actual hardware. The tests include overlap-window boundary ownership, Unicode preservation, typed-note preservation and archive compatibility.
+1. Connect calendar and allow macOS Calendar access. Minutes reads upcoming events from calendars synced in macOS Calendar, including Google and iCloud. Add the same account used in Notion Calendar to macOS Internet Accounts and enable Calendars if events are missing. Choose which calendars appear. Minutes does not modify calendar events.
+2. Create a Notion internal connection with read, insert, and update content permissions. In Notion, share a parent page or database with it through the page&#x27;s Connections menu. Save the secret in Minutes; it is stored separately in Keychain.
+3. Choose Create a Minutes database and paste the parent page link, or connect an existing database with title and date properties. The first data source is used; if there are multiple date properties, the alphabetically first is used.
+4. Click an upcoming event. Minutes reuses its note on later clicks, preserving your writing. Recurring occurrences get separate notes. When connected, a dated Notion page is created. Open in Notion takes you to it. Finished AI notes sync automatically if enabled; Sync to Notion is also available in the note menu. Transcripts are excluded unless enabled.
+5. In Notion Calendar, add the Minutes database to display its dated pages. Notion&#x27;s own native upcoming-event-to-AI-note attachment flow is not exposed through its documented Calendar API. Minutes supplies its own upcoming sidebar and real Notion pages; it cannot force Notion&#x27;s native event attachment or open an exact native Notion tab. Original calendar events remain unchanged.
+
+Sync is one-way from Minutes. It updates the page title/date and replaces its managed Minutes notes section; put edits made directly in Notion outside that section. Manual note changes can be pushed with Sync to Notion. Sync errors are shown with retry. The page ID is saved before content upload so a retry reuses it. Disconnecting does not delete existing notes or pages. A live Notion key and real calendar accounts are required to verify account-specific behavior.
+
+## Data and build
+
+Replacing Minutes.app preserves `~/Library/Application Support/Minutes`. Copy that folder while the app is closed for an audio-inclusive backup. JSON backups contain text without audio. No recordings are automatically deleted.
+
+`bash build.command` runs Foundation core checks then builds the app with Apple Command Line Tools. `MINUTES_RUN_TESTS=1` requires full Xcode. Compiling this source now requires the macOS 26 SDK even when targeting older macOS. GitHub Actions runs tests, builds arm64 and x86_64, verifies the ad-hoc signature, and packages the app. The app is not Developer ID notarized.
+
+Hardware acceptance: use mic mute to isolate direct computer transcription; test output muted and headphones; pause/resume both sources; change focus to exercise floating controls; click a recurring event twice and connect a test Notion destination before using account sync. Synthetic tests check PCM channel extraction, pause/mute file gating, resampling, recurring-event identity, Notion text/IDs, persistence and the text-only AI request. These checks do not prove real speech accuracy or remote service behavior.
 </pre>

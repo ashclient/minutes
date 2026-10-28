@@ -50,6 +50,7 @@ import UniformTypeIdentifiers
         .confirmationDialog("Replace the AI notes?", isPresented: $regenerate) { Button("Generate again") { if let meeting { pipeline.resume(id: meeting.id, store: store, recorder: recorder) } } } message: { Text("Your own notes and transcript are kept.") }
         .confirmationDialog("Transcribe the recordings again?", isPresented: $transcribeAgain) { Button("Transcribe & make notes") { if let meeting { pipeline.retranscribe(id: meeting.id, store: store, recorder: recorder) } } } message: { Text("Apple will refresh the transcript from your saved audio.") }
         .onChange(of: store.selectedID) { _, _ in pane = meeting?.summary.isEmpty == false ? "AI notes" : "Notes"; recordingsOpen = false }
+        .onAppear { pane = meeting?.summary.isEmpty == false ? "AI notes" : "Notes" }
         .alert("Minutes", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("OK") { store.error = nil } } message: { Text(store.error ?? "") }
     }
     private var sidebarView: some View {

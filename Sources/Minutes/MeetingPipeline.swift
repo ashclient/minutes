@@ -149,7 +149,7 @@ import AVFoundation
         try Task.checkCancellation()
         store.update(id) { $0.apply(result, originalTitle: meeting.title) }
         stage = "ready"; message = "Notes ready"
-        if UserDefaults.standard.bool(forKey: "notionAutoSync") { await NotionSync.shared.sync(id: id, store: store) }
+        if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await NotionSync.shared.sync(id: id, store: store) } }
     }
     static func group(_ file: String) -> String {
         if file.hasSuffix("-mic.m4a") { return String(file.dropLast(8)) }
