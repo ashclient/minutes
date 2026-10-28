@@ -37,7 +37,8 @@ final class MinutesTests: XCTestCase {
             count += converted.frameLength
         }
         for tail in try converter.finish() { count += tail.frameLength }
-        XCTAssertEqual(Double(count), 16000, accuracy: 2)
+        // Apple's resampler can pad its final filter tail by less than 1 ms.
+        XCTAssertEqual(Double(count), 16000, accuracy: 16)
     }
     func testArchiveRoundTripPreservesEditsAndTasks() throws {
         var meeting = Meeting()
