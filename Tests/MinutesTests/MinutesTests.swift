@@ -48,7 +48,7 @@ final class MinutesTests: XCTestCase {
         let source = String(repeating: "🎙️ 中文 café ", count: 500)
         let rich = NotionClient.rich(source)
         let parts = rich.compactMap { ($0["text"] as? [String: String])?["content"] }
-        XCTAssertEqual(parts.joined(), source); XCTAssertTrue(parts.allSatisfy { $0.count <= 1800 })
+        XCTAssertEqual(parts.joined(), source); XCTAssertTrue(parts.allSatisfy { $0.utf16.count <= 1800 })
         XCTAssertEqual(RecordingTrack.source("meeting-computer.caf"), "Computer")
         XCTAssertEqual(RecordingTrack.source("meeting-computer.m4a"), "Computer")
         XCTAssertEqual(RecordingTrack.source("meeting-mic.caf"), "Microphone")

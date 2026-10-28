@@ -28,7 +28,17 @@ struct NotionClient {
         guard let id = UUID(uuidString: String(plain.prefix(8)) + "-" + String(plain.dropFirst(8).prefix(4)) + "-" + String(plain.dropFirst(12).prefix(4)) + "-" + String(plain.dropFirst(16).prefix(4)) + "-" + String(plain.suffix(12))) else { throw AppFailure("That Notion ID is invalid.") }
         return id.uuidString.lowercased()
     }
-    static func rich(_ text: String) -> [[String: Any]] { AIClient.chunks(text, limit: 1800).map { ["type": "text", "text": ["content": $0]] } }
+    static func rich(_ text: String) -> [[String: Any]] {
+        // Bound UTF-16 units as well as Swift graphemes for Notion's string limit.
+        var parts: [String] = []; var current = ""; var units = 0
+        for scalar in text.unicodeScalars {
+            let size = scalar.value > 0xffff ? 2 : 1
+            if units + size > 1800 { parts.append(current); current = ""; units = 0 }
+            current.unicodeScalars.append(scalar); units += size
+        }
+        if !current.isEmpty { parts.append(current) }
+        return parts.map { ["type": "text", "text": ["content": $0]] }
+    }
     static func block(_ text: String, type: String = "paragraph") -> [String: Any] { ["object": "block", "type": type, type: ["rich_text": rich(text)]] }
     static func content(_ meeting: Meeting, transcript: Bool) -> [[String: Any]] {
         var text = ""

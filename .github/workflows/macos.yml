@@ -22,6 +22,7 @@ jobs:
       - name: Capture UI preview
         continue-on-error: true
         run: |
+          python3 Checks/preview_fixture.py
           open dist/Minutes.app
           sleep 3
           screencapture -x dist/Minutes-preview.png

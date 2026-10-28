@@ -20,6 +20,7 @@ import UniformTypeIdentifiers
     @State private var pane = "Notes"
     @State private var regenerate = false
     @State private var transcribeAgain = false
+    @State private var deletingID: UUID?
     private var meeting: Meeting? { store.meetings.first { $0.id == store.selectedID } }
     private var processingSelected: Bool { pipeline.working && pipeline.activeID == store.selectedID }
     private var recordingSelected: Bool { recorder.recording && recorder.meetingID == store.selectedID }
@@ -49,6 +50,7 @@ import UniformTypeIdentifiers
         }
         .confirmationDialog("Replace the AI notes?", isPresented: $regenerate) { Button("Generate again") { if let meeting { pipeline.resume(id: meeting.id, store: store, recorder: recorder) } } } message: { Text("Your own notes and transcript are kept.") }
         .confirmationDialog("Transcribe the recordings again?", isPresented: $transcribeAgain) { Button("Transcribe & make notes") { if let meeting { pipeline.retranscribe(id: meeting.id, store: store, recorder: recorder) } } } message: { Text("Apple will refresh the transcript from your saved audio.") }
+        .confirmationDialog("Permanently delete this note and its recordings?", isPresented: Binding(get: { deletingID != nil }, set: { if !$0 { deletingID = nil } })) { Button("Delete permanently", role: .destructive) { if let id = deletingID { store.deleteForever(id) }; deletingID = nil } }
         .onChange(of: store.selectedID) { _, _ in pane = meeting?.summary.isEmpty == false ? "AI notes" : "Notes"; recordingsOpen = false }
         .onAppear { pane = meeting?.summary.isEmpty == false ? "AI notes" : "Notes" }
         .alert("Minutes", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("OK") { store.error = nil } } message: { Text(store.error ?? "") }
@@ -61,7 +63,7 @@ import UniformTypeIdentifiers
                 VStack(alignment: .leading, spacing: 3) {
                     if calendar.authorized && store.query.isEmpty && store.filter != "Trash" {
                         HStack { sectionLabel("Upcoming"); Spacer(); Button { calendar.refresh() } label: { Image(systemName: "arrow.clockwise").font(.system(size: 10)) }.buttonStyle(.plain).help("Refresh events") }.padding(.horizontal, 9).padding(.top, 24).padding(.bottom, 5)
-                        ForEach(Array(calendar.events.prefix(showAllEvents ? 50 : 5))) { event in eventRow(event) }
+                        ForEach(Array(calendar.events.prefix(showAllEvents ? calendar.events.count : 5))) { event in eventRow(event) }
                         if calendar.events.isEmpty { Text(calendar.message).font(.system(size: 11)).foregroundStyle(.secondary).padding(9) }
                         if calendar.events.count > 5 { Button(showAllEvents ? "Show less" : "View all events") { showAllEvents.toggle() }.font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(.secondary).padding(9) }
                     } else if !calendar.authorized && store.query.isEmpty {
@@ -98,7 +100,7 @@ import UniformTypeIdentifiers
         }.buttonStyle(.plain).contextMenu {
             Button(note.favorite ? "Remove favorite" : "Favorite") { store.update(note.id) { $0.favorite.toggle() } }
             Button("Export notes…") { store.export(note) }
-            if note.trashed { Button("Restore") { store.update(note.id) { $0.trashed = false } } }
+            if note.trashed { Button("Restore") { store.update(note.id) { $0.trashed = false } }; Button("Delete permanently…", role: .destructive) { deletingID = note.id }.disabled(protected(note.id)) }
             else { Button("Move to Trash") { store.update(note.id) { $0.trashed = true }; if store.selectedID == note.id { store.selectedID = nil } }.disabled(protected(note.id)) }
         }
     }

@@ -14,7 +14,7 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
     private var paused = false
     private var failure: String?
     private var frames = 0
-    var hasFrames: Bool { lock.lock(); defer { lock.unlock() }; return frames > 0 }
+    var hasFrames: Bool { (feed?.receivedSeconds ?? 0) > 0 }
     var status: (Float, String?, Int) {
         lock.lock(); let sink = sink; let failure = failure; let frames = frames; lock.unlock()
         let state = sink?.status ?? (0, nil)
