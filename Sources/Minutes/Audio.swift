@@ -165,7 +165,10 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate {
     private var timeout: Task<Void, Never>?
     private var requestID: UUID?
 
-    func transcribe(url: URL, source: String, timeOffset: Double = 0, progress: (String) -> Void, partial: ([TranscriptLine]) -> Void) async throws -> [TranscriptLine] {
+    func transcribe(url: URL, source: String, timeOffset: Double = 0, progress: (String) -> Void, partial: @escaping ([TranscriptLine]) -> Void) async throws -> [TranscriptLine] {
+        if #available(macOS 26.0, *) {
+            return try await TahoeSpeech.transcribe(url: url, source: source, timeOffset: timeOffset, progress: progress, partial: partial)
+        }
         let permission = await withCheckedContinuation { continuation in SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) } }
         guard permission == .authorized else { throw AppFailure("Enable Speech Recognition for Minutes in System Settings → Privacy & Security.") }
         let locale = UserDefaults.standard.string(forKey: "speechLocale") ?? "en-US"

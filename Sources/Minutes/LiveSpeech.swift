@@ -7,10 +7,13 @@ final class SpeechFeed: @unchecked Sendable {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var history: [(AVAudioPCMBuffer, Double, Double)] = []
     private var total = 0.0
+    private var modern: (@Sendable (AVAudioPCMBuffer) -> Void)?
+    func connectModern(_ callback: @escaping @Sendable (AVAudioPCMBuffer) -> Void) { lock.lock(); modern = callback; lock.unlock() }
+    func disconnectModern() { lock.lock(); modern = nil; lock.unlock() }
     var receivedSeconds: Double { lock.lock(); defer { lock.unlock() }; return total }
     func append(_ buffer: AVAudioPCMBuffer) {
         lock.lock(); defer { lock.unlock() }
-        request?.append(buffer)
+        if let modern { modern(buffer) } else { request?.append(buffer) }
         let start = total; total += Double(buffer.frameLength) / buffer.format.sampleRate
         // The capture worker gives us independently owned buffers.
         history.append((buffer, start, total))
@@ -29,6 +32,7 @@ final class SpeechFeed: @unchecked Sendable {
 
 @MainActor final class LiveSpeech {
     let feed = SpeechFeed()
+    private var modern: AnyObject?
     private var recognizer: SFSpeechRecognizer?
     private var task: SFSpeechRecognitionTask?
     private var timer: Timer?
@@ -42,6 +46,12 @@ final class SpeechFeed: @unchecked Sendable {
     private var onText: (([TranscriptLine]) -> Void)?
     var status = "Live microphone transcript"
     func prepare() async throws {
+        if #available(macOS 26.0, *) {
+            let session = TahoeSpeech()
+            try await session.prepare()
+            modern = session; status = "Apple SpeechAnalyzer · on device"
+            return
+        }
         let permission = await withCheckedContinuation { c in SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) } }
         guard permission == .authorized else { throw AppFailure("Speech permission is off. Enable Minutes in Privacy & Security → Speech Recognition.") }
         let locale = UserDefaults.standard.string(forKey: "speechLocale") ?? "en-US"
@@ -49,7 +59,11 @@ final class SpeechFeed: @unchecked Sendable {
         self.recognizer = recognizer
     }
     func start(onText: @escaping ([TranscriptLine]) -> Void) async throws {
-        if recognizer == nil { try await prepare() }
+        if recognizer == nil && modern == nil { try await prepare() }
+        if #available(macOS 26.0, *), let modern = modern as? TahoeSpeech {
+            try await modern.start(feed: feed, onText: onText)
+            return
+        }
         self.onText = onText; begin(since: 0)
         timer = Timer.scheduledTimer(withTimeInterval: 45, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.rotate() }
@@ -97,6 +111,11 @@ final class SpeechFeed: @unchecked Sendable {
         onText?(text.isEmpty ? [] : [TranscriptLine(seconds: 0, source: "Microphone", text: text)])
     }
     func stop() async -> Bool {
+        if #available(macOS 26.0, *), let modern = modern as? TahoeSpeech {
+            let complete = await modern.stop(feed: feed)
+            if let error = modern.failure { status = "Apple speech: " + error }
+            return complete
+        }
         stopped = true; timer?.invalidate(); timer = nil
         await transition?.value
         feed.detach()

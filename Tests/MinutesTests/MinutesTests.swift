@@ -23,6 +23,21 @@ final class MinutesTests: XCTestCase {
         XCTAssertEqual(saved.frameLength, 48000)
         XCTAssertEqual(saved.floatChannelData![0][100], buffer.floatChannelData![0][100], accuracy: 0.0001)
     }
+    func testAppleSpeechFormatConversionPreservesDuration() throws {
+        let source = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
+        let target = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1))
+        let converter = SpeechPCMConverter(target: target)
+        let input = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: source, frameCapacity: 4800))
+        input.frameLength = 4800
+        for i in 0..<4800 { input.floatChannelData![0][i] = Float(sin(Double(i) * 0.08) * 0.2) }
+        var count: AVAudioFrameCount = 0
+        for _ in 0..<10 {
+            let converted = try converter.convert(input)
+            XCTAssertEqual(converted.format, target)
+            count += converted.frameLength
+        }
+        XCTAssertEqual(Double(count), 16000, accuracy: 64)
+    }
     func testArchiveRoundTripPreservesEditsAndTasks() throws {
         var meeting = Meeting()
         meeting.title = "Budget / planning"

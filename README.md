@@ -1,4 +1,4 @@
-# Minutes 1.3
+# Minutes 1.4
 
 Native Mac meeting and lecture notes. macOS 14 or newer. Download the compiled app from the successful GitHub Actions build, unzip, and move Minutes.app to Applications.
 
@@ -6,7 +6,9 @@ Native Mac meeting and lecture notes. macOS 14 or newer. Download the compiled a
 
 - **New note** (Command-N): create a note without recording. Write in **My notes**; text is saved as you type.
 - **Record**: if the current note has no recording or AI output, recording attaches to it. Otherwise a new meeting is created. You can keep typing in My notes while recording.
-- **Transcript**: shows live on-device Apple recognition of your microphone. Initial recognition permission can take a moment. Live recognition preserves the recognizer’s formatted text, including when it revises or restarts a phrase. Requests rotate sequentially, buffering incoming audio during the handoff. Provisional word timestamps are never used to discard recognized text.
+- **Transcript**: shows live on-device Apple recognition of your microphone. Initial recognition permission can take a moment. On macOS Tahoe 26, SpeechAnalyzer and Apple SpeechTranscriber perform continuous live and whole-file transcription directly. They provide finalized results and separate provisional updates; there are no 45-second dictation resets or custom word-timestamp filters on this path. Apple may need to install system-managed language assets once. macOS 14/15 retain the legacy path.
+
+Legacy live recognition preserves the recognizer’s formatted text, including when it revises or restarts a phrase. Requests rotate sequentially, buffering incoming audio during the handoff. Provisional word timestamps are never used to discard recognized text.
 - **Stop & make notes**: waits for the microphone transcript to finish, then sends text and your typed notes to OpenRouter for a summary, detailed key points, decisions and next steps. If live recognition is unavailable or incomplete, the saved audio is transcribed first with overlapping windows. Computer audio, if enabled, is transcribed after stopping.
 - **AI notes**: read, copy or edit generated notes. My notes remain separate and editable. To include later changes, use Generate again.
 - **Details**: play recordings, review the transcript, paste transcript text or remove saved audio while retaining text.
