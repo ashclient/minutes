@@ -74,7 +74,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("--preview-calendar") { showCalendar = true }
             if ProcessInfo.processInfo.arguments.contains("--preview-finish"), let id = store.selectedID { pipeline.finishID = id }
-            if ProcessInfo.processInfo.arguments.contains("--preview-connections") || ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-google") { openSettings("Connections") }
+            if ProcessInfo.processInfo.arguments.contains("--preview-connections") || (ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-notion-destination")) || ProcessInfo.processInfo.arguments.contains("--preview-google") { openSettings("Connections") }
             if ProcessInfo.processInfo.arguments.contains("--preview-settings") { openSettings("General") }
             if UserDefaults.standard.bool(forKey: "notionAutoSync") {
                 for note in store.meetings where !note.trashed && note.notionNeedsSync == true && (note.notionPageID != nil || note.calendarEventKey != nil) {

@@ -70,6 +70,7 @@ struct NotionPageChoice: Identifiable, Equatable {
             if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         }.padding(24).frame(minHeight: 500, alignment: .topLeading) }.frame(width: 490, height: 550)
         .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("--preview-notion-destination") { step = 1; canCreatePrivate = true; destination = "workspace"; return }
             if UserDefaults.standard.bool(forKey: "notionEnabled"), let saved = try? CloudKey.read(service: "notion"), !saved.isEmpty { verifiedKey = saved; step = 1; Task { await checkOwner() } }
         }
     }
@@ -109,6 +110,7 @@ struct NotionPageChoice: Identifiable, Equatable {
     private func finish() async {
         working = true; message = ""; defer { working = false }
         do {
+            guard !verifiedKey.isEmpty else { throw AppFailure("Add your personal token first.") }
             if destination == "workspace" {
                 guard canCreatePrivate else { throw AppFailure("Use a personal access token for top-level private pages.") }
                 try CloudKey.save(verifiedKey, service: "notion")

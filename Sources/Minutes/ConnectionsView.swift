@@ -66,9 +66,9 @@ import AppKit
         .sheet(isPresented: $google) { GoogleSetup().environmentObject(calendar) }
         .sheet(isPresented: $notion) { NotionSetup() }
         .task {
-            if ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-google") {
+            if (ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-notion-destination")) || ProcessInfo.processInfo.arguments.contains("--preview-google") {
                 try? await Task.sleep(nanoseconds: 600_000_000)
-                if ProcessInfo.processInfo.arguments.contains("--preview-notion") { notion = true } else { google = true }
+                if (ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-notion-destination")) { notion = true } else { google = true }
             }
         }
     }

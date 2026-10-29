@@ -91,6 +91,15 @@ enum GoogleCalendarEvent {
     }
     func loadMonth(_ date: Date) {
         monthTask?.cancel(); monthEvents = []; monthMessage = ""
+        if ProcessInfo.processInfo.arguments.contains("--preview-calendar") {
+            let c = Calendar.current
+            let first = c.dateInterval(of: .month, for: date)!.start
+            monthEvents = (0..<12).map { index in
+                let start = c.date(byAdding: .day, value: index * 2 + 1, to: first)!.addingTimeInterval(Double(12 + index % 4) * 3600)
+                return CalendarMeeting(id: "preview-" + String(index), title: ["Introduction to Business", "Accounting · chapter review", "Precalculus", "Study group"][index % 4], start: start, end: start.addingTimeInterval(3600), calendar: index % 4 == 3 ? "Study" : "Classes", color: .blue, eventURL: nil)
+            }
+            monthLoading = false; return
+        }
         guard authorized else { monthMessage = "Connect Google Calendar in Connections to see your events."; return }
         let range = CalendarLayout.gridDates(for: date)
         guard let first = range.first, let last = range.last, let end = Calendar.current.date(byAdding: .day, value: 1, to: last) else { return }

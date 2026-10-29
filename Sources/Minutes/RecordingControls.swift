@@ -44,9 +44,11 @@ import Combine
         if #available(macOS 15.0, *) { panel.collectionBehavior.insert(.canJoinAllApplications) }
         panel.isMovableByWindowBackground = true; panel.isReleasedWhenClosed = false
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
-        panel.contentView = NSHostingView(rootView: FloatingRecorderView(showMain: { [weak self] in self?.showMain() }, resize: { [weak self] collapsed in self?.resize(collapsed) }).environmentObject(store).environmentObject(recorder).environmentObject(pipeline))
+        let previewCollapsed = ProcessInfo.processInfo.arguments.contains("--preview-recorder-collapsed")
+        panel.contentView = NSHostingView(rootView: FloatingRecorderView(showMain: { [weak self] in self?.showMain() }, resize: { [weak self] collapsed in self?.resize(collapsed) }, initiallyCollapsed: previewCollapsed).environmentObject(store).environmentObject(recorder).environmentObject(pipeline))
         if let screen = NSScreen.main { panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 352, y: screen.visibleFrame.minY + 24)) }
         self.panel = panel
+        if ProcessInfo.processInfo.arguments.contains("--preview-recorder") || previewCollapsed { resize(previewCollapsed); panel.orderFrontRegardless(); return }
         recorder.$recording.receive(on: RunLoop.main).sink { [weak self] _ in self?.update() }.store(in: &subscriptions)
         pipeline.$finishID.compactMap { $0 }.receive(on: RunLoop.main).sink { [weak self] _ in self?.showMain() }.store(in: &subscriptions)
         for name in [NSApplication.didResignActiveNotification, NSApplication.didBecomeActiveNotification, NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification, NSWindow.willCloseNotification] {
@@ -113,6 +115,9 @@ private struct RecorderDragHandle: NSViewRepresentable {
     let showMain: () -> Void
     let resize: (Bool) -> Void
     @State private var collapsed = false
+    init(showMain: @escaping () -> Void, resize: @escaping (Bool) -> Void, initiallyCollapsed: Bool = false) {
+        self.showMain = showMain; self.resize = resize; _collapsed = State(initialValue: initiallyCollapsed)
+    }
     var body: some View {
         VStack(spacing: 5) {
             if !collapsed {
