@@ -11,7 +11,7 @@ import Combine
         HStack(spacing: compact ? 8 : 18) {
             HStack(spacing: 7) {
                 Circle().fill(recorder.paused ? Color.orange : Color.red).frame(width: 6, height: 6)
-                Text(String(format: "%02d:%02d", Int(recorder.elapsed) / 60, Int(recorder.elapsed) % 60)).font(.system(size: 12, weight: .medium, design: .monospaced))
+                RecordingClock(meters: recorder.meters)
                 if recorder.paused { Text("Paused").font(.caption).foregroundStyle(.secondary) }
             }
             if !compact { Spacer(minLength: 4) }
@@ -35,6 +35,9 @@ import Combine
     private weak var recorder: Recorder?
     private weak var store: Store?
     private var collapsed = false
+    private let dock = RecorderDockState()
+    private var restoredFrame: NSRect?
+    private var moveCheck: Task<Void, Never>?
     func configure(store: Store, recorder: Recorder, pipeline: MeetingPipeline) {
         guard panel == nil else { return }
         self.recorder = recorder; self.store = store
@@ -45,9 +48,21 @@ import Combine
         panel.isMovableByWindowBackground = true; panel.isReleasedWhenClosed = false
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         let previewCollapsed = ProcessInfo.processInfo.arguments.contains("--preview-recorder-collapsed")
-        panel.contentView = NSHostingView(rootView: FloatingRecorderView(showMain: { [weak self] in self?.showMain() }, resize: { [weak self] collapsed in self?.resize(collapsed) }, initiallyCollapsed: previewCollapsed).environmentObject(store).environmentObject(recorder).environmentObject(pipeline))
+        panel.contentView = NSHostingView(rootView: FloatingRecorderView(showMain: { [weak self] in self?.showMain() }, resize: { [weak self] collapsed in self?.resize(collapsed) }, dock: dock, restore: { [weak self] in self?.restore() }, initiallyCollapsed: previewCollapsed).environmentObject(store).environmentObject(recorder).environmentObject(pipeline))
         if let screen = NSScreen.main { panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 352, y: screen.visibleFrame.minY + 24)) }
         self.panel = panel
+        panel.dragEnded = { [weak self] in self?.dockIfNeeded() }
+        observers.append(NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                self?.moveCheck?.cancel()
+                self?.moveCheck = Task { [weak self] in
+                    do { try await Task.sleep(nanoseconds: 180_000_000) } catch { return }
+                    if NSEvent.pressedMouseButtons == 0 { self?.dockIfNeeded() }
+                }
+            }
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.restore() } })
+        if ProcessInfo.processInfo.arguments.contains("--preview-recorder-docked") { panel.setFrameOrigin(NSPoint(x: NSScreen.main!.frame.maxX - 80, y: panel.frame.minY)); dockIfNeeded(); panel.orderFrontRegardless(); return }
         if ProcessInfo.processInfo.arguments.contains("--preview-recorder") || previewCollapsed { resize(previewCollapsed); panel.orderFrontRegardless(); return }
         recorder.$recording.receive(on: RunLoop.main).sink { [weak self] _ in self?.update() }.store(in: &subscriptions)
         pipeline.$finishID.compactMap { $0 }.receive(on: RunLoop.main).sink { [weak self] _ in self?.showMain() }.store(in: &subscriptions)
@@ -66,6 +81,24 @@ import Combine
         }
         panel.setFrame(frame, display: true, animate: false)
     }
+    private func dockIfNeeded() {
+        guard let panel, dock.edge == nil else { return }
+        let frames = NSScreen.screens.map(\.frame)
+        guard let edge = RecorderDockGeometry.edge(for: panel.frame, screens: frames), let target = RecorderDockGeometry.screen(for: panel.frame, screens: frames), let screen = NSScreen.screens.first(where: { $0.frame == target }) else { return }
+        restoredFrame = panel.frame; dock.edge = edge
+        panel.setFrame(RecorderDockGeometry.dockFrame(edge: edge, previous: panel.frame, visible: screen.visibleFrame), display: true)
+    }
+    private func restore() {
+        guard let panel else { return }
+        moveCheck?.cancel()
+        let size = NSSize(width: collapsed ? 244 : 280, height: collapsed ? 44 : 76)
+        let old = restoredFrame ?? panel.frame
+        let screen = panel.screen ?? NSScreen.main
+        if let visible = screen?.visibleFrame {
+            panel.setFrame(RecorderDockGeometry.restored(NSRect(origin: old.origin, size: size), visible: visible), display: true)
+        }
+        restoredFrame = nil; dock.edge = nil
+    }
     private func update() {
         let main = NSApp.windows.first { $0.identifier?.rawValue == "main" || ($0.title == "Minutes" && !($0 is NSPanel)) }
         if recorder?.recording == true && (!NSApp.isActive || main?.isMiniaturized == true || main?.isVisible != true) { panel?.orderFrontRegardless() }
@@ -78,6 +111,8 @@ import Combine
     }
 }
 private final class RecordingPanel: NSPanel {
+    var dragEnded: (() -> Void)?
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
@@ -101,7 +136,7 @@ private struct RecorderDragHandle: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { DragView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
     private final class DragView: NSView {
-        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event); (window as? RecordingPanel)?.dragEnded?() }
         override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
         override func draw(_ dirtyRect: NSRect) {
             NSColor.secondaryLabelColor.withAlphaComponent(0.45).setFill()
@@ -114,16 +149,24 @@ private struct RecorderDragHandle: NSViewRepresentable {
     @EnvironmentObject var store: Store
     let showMain: () -> Void
     let resize: (Bool) -> Void
+    @ObservedObject var dock: RecorderDockState
+    let restore: () -> Void
     @State private var collapsed = false
-    init(showMain: @escaping () -> Void, resize: @escaping (Bool) -> Void, initiallyCollapsed: Bool = false) {
-        self.showMain = showMain; self.resize = resize; _collapsed = State(initialValue: initiallyCollapsed)
+    init(showMain: @escaping () -> Void, resize: @escaping (Bool) -> Void, dock: RecorderDockState, restore: @escaping () -> Void, initiallyCollapsed: Bool = false) {
+        self.showMain = showMain; self.resize = resize; self.dock = dock; self.restore = restore; _collapsed = State(initialValue: initiallyCollapsed)
     }
     var body: some View {
+        if let edge = dock.edge {
+            Button(action: restore) {
+                VStack(spacing: 3) { Image(systemName: edge.icon).font(.system(size: 11, weight: .semibold)); Circle().fill(recorder.paused ? Color.orange : Color.red).frame(width: 3, height: 3) }
+                    .frame(width: edge.vertical ? 24 : 44, height: edge.vertical ? 44 : 24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            }.buttonStyle(.plain).help("Show recording controls").accessibilityLabel("Show recording controls")
+        } else {
         VStack(spacing: 5) {
             if !collapsed {
                 HStack(spacing: 6) {
                     RecorderDragHandle().frame(width: 12, height: 24).help("Drag to move recorder")
-                    AudioWaveform(level: Double(max(recorder.microphoneMuted ? 0 : recorder.level, recorder.computerLevel)), paused: recorder.paused)
+                    RecorderWaveform(meters: recorder.meters, muted: recorder.microphoneMuted, paused: recorder.paused)
                     Text(store.meetings.first { $0.id == recorder.meetingID }?.title ?? "Recording").lineLimit(1).font(.system(size: 11, weight: .medium))
                     Spacer(minLength: 0)
                     Button(action: showMain) { Image(systemName: "arrow.up.right") }.help("Open meeting in Minutes")
@@ -131,12 +174,13 @@ private struct RecorderDragHandle: NSViewRepresentable {
                 }.buttonStyle(.plain).font(.system(size: 10))
             }
             HStack(spacing: 5) {
-                if collapsed { RecorderDragHandle().frame(width: 12, height: 24).help("Drag to move recorder"); AudioWaveform(level: Double(max(recorder.microphoneMuted ? 0 : recorder.level, recorder.computerLevel)), paused: recorder.paused).frame(width: 24).clipped() }
+                if collapsed { RecorderDragHandle().frame(width: 12, height: 24).help("Drag to move recorder"); RecorderWaveform(meters: recorder.meters, muted: recorder.microphoneMuted, paused: recorder.paused).frame(width: 24).clipped() }
                 RecordingControls(compact: true)
                 if collapsed { collapseButton }
             }
         }.padding(.horizontal, 10).padding(.vertical, 7).frame(width: collapsed ? 244 : 280, height: collapsed ? 44 : 76)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: collapsed ? 22 : 13)).overlay(RoundedRectangle(cornerRadius: collapsed ? 22 : 13).stroke(Color.primary.opacity(0.1)))
+    }
     }
     private var collapseButton: some View {
         Button { collapsed.toggle(); resize(collapsed) } label: { Image(systemName: collapsed ? "chevron.up" : "chevron.down").font(.system(size: 10)).frame(width: 18, height: 22) }.buttonStyle(.plain).help(collapsed ? "Expand recorder" : "Collapse recorder").accessibilityLabel(collapsed ? "Expand recorder" : "Collapse recorder")

@@ -7,9 +7,10 @@ import CoreMedia
     @Published private(set) var paused = false
     @Published private(set) var microphoneMuted = false
     @Published private(set) var computerEnabled = false
-    @Published private(set) var elapsed: TimeInterval = 0
-    @Published private(set) var level: Float = 0
-    @Published private(set) var computerLevel: Float = 0
+    let meters = RecorderMeters()
+    var elapsed: TimeInterval { get { meters.elapsed } set { meters.elapsed = newValue } }
+    var level: Float { get { meters.microphone } set { meters.microphone = newValue } }
+    var computerLevel: Float { get { meters.computer } set { meters.computer = newValue } }
     @Published var failure: String?
     @Published private(set) var liveStatus = ""
     @Published private(set) var computerStatus = "Off"
@@ -25,6 +26,7 @@ import CoreMedia
     private var micName = ""
     private var computerName = ""
     private var liveWords = 0
+    private var microphoneLines: [TranscriptLine] = []
     private(set) var completedFiles: [String] = []
     private(set) var diagnostics = ""
     private(set) var voicedDuration = 0.0
@@ -36,7 +38,7 @@ import CoreMedia
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
         guard granted else { throw AppFailure("Microphone access is off. Enable Minutes in System Settings → Privacy & Security → Microphone.") }
         paused = false; microphoneMuted = false; computerEnabled = includeComputer
-        completedFiles = []; liveWords = 0; voicedDuration = 0; elapsed = 0; failure = nil
+        completedFiles = []; liveWords = 0; microphoneLines = []; voicedDuration = 0; elapsed = 0; failure = nil
         let stem = "\(id.uuidString)-\(UUID().uuidString)"
         micName = stem + "-mic.caf"; computerName = stem + "-computer.caf"
         let microphoneSpeech = LiveSpeech()
@@ -48,7 +50,7 @@ import CoreMedia
                 try Task.checkCancellation()
                 try await microphoneSpeech.start { [weak self] lines in
                     guard let self else { return }
-                    self.liveWords = lines.map(\.text).joined(separator: " ").split(whereSeparator: \.isWhitespace).count
+                    self.microphoneLines = lines
                     self.onLiveText?(lines, self.micName)
                 }
                 live = microphoneSpeech; liveStatus = microphoneSpeech.status
@@ -91,13 +93,14 @@ import CoreMedia
         if !paused { elapsed += now.timeIntervalSince(lastTick) }; lastTick = now
         if let mic = microphone {
             let state = mic.status; level = paused || microphoneMuted ? 0 : state.0
-            if let error = state.1 { failure = error }
+            if let error = state.1, failure != error { failure = error }
         }
-        if let live { liveStatus = live.status }
+        if let live, liveStatus != live.status { liveStatus = live.status }
         if let computer {
             let state = computer.status; computerLevel = paused ? 0 : state.0
-            computerStatus = state.2 > 0 ? (state.0 > 0.015 ? "Receiving computer audio" : "Connected · quiet") : "Waiting for computer audio"
-            if let error = state.1 { failure = error; computerStatus = error }
+            let status = state.1 ?? (state.2 > 0 ? "Receiving computer audio" : "Waiting for computer audio")
+            if computerStatus != status { computerStatus = status }
+            if let error = state.1, failure != error { failure = error }
         }
     }
     func toggleMicrophone() {
@@ -119,7 +122,9 @@ import CoreMedia
         let micSpeech = live; let systemSpeech = computerSpeech
         async let microphoneDone = micSpeech?.stop()
         async let computerDone = systemSpeech?.stop()
-        if await microphoneDone == true, !(voicedDuration > 10 && Double(liveWords) < voicedDuration * 0.5) { completedFiles.append(micName) }
+        let micComplete = await microphoneDone
+        liveWords = microphoneLines.reduce(0) { $0 + $1.text.split(whereSeparator: \.isWhitespace).count }
+        if micComplete == true, !(voicedDuration > 10 && Double(liveWords) < voicedDuration * 0.5) { completedFiles.append(micName) }
         if await computerDone == true { completedFiles.append(computerName) }
         // An idle source may deliver no buffers at all. Never hand a missing file to transcription.
         if let computer, !computer.hasFrames { files.removeAll { $0 == computerName }; completedFiles.removeAll { $0 == computerName } }

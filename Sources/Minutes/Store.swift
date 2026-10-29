@@ -15,6 +15,9 @@ import AppKit
     let audio: URL
     private var saveTask: Task<Void, Never>?
     private var loaded = false
+    private var saveRevision = 0
+    private lazy var persistence = ArchivePersistence(root: root)
+    private var searchCache: [UUID: String] = [:]
 
     init(root: URL? = nil) {
         self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Minutes", isDirectory: true)
@@ -42,12 +45,16 @@ import AppKit
         meetings.filter { m in
             (filter == "Trash" ? m.trashed : !m.trashed) &&
             (filter == "All meetings" || filter == "Trash" || (filter == "Favorites" ? m.favorite : m.notebook == filter)) &&
-            (query.isEmpty || m.searchableText.localizedCaseInsensitiveContains(query))
+            (query.isEmpty || searchText(m).localizedCaseInsensitiveContains(query))
         }.sorted { $0.updatedAt > $1.updatedAt }
+    }
+    private func searchText(_ meeting: Meeting) -> String {
+        if let text = searchCache[meeting.id] { return text }
+        let text = meeting.searchableText; searchCache[meeting.id] = text; return text
     }
     @discardableResult func create() -> UUID? {
         guard loaded else { error = "Resolve the data loading error before creating notes."; return nil }
-        var m = Meeting()
+        var m = Meeting(); m.notionSyncEnabled = false
         if !["All meetings", "Favorites", "Trash"].contains(filter) { m.notebook = filter }
         meetings.insert(m, at: 0); selectedID = m.id
         if filter == "Trash" || filter == "Favorites" { filter = "All meetings" }
@@ -56,32 +63,45 @@ import AppKit
     func update(_ id: UUID, _ change: (inout Meeting) -> Void) {
         guard loaded, let i = meetings.firstIndex(where: { $0.id == id }) else { return }
         let previous = meetings[i]
-        change(&meetings[i])
-        if previous.notes != meetings[i].notes || previous.summary != meetings[i].summary || previous.title != meetings[i].title || previous.transcript != meetings[i].transcript || previous.actions != meetings[i].actions || previous.eventStart != meetings[i].eventStart || previous.eventEnd != meetings[i].eventEnd { meetings[i].notionNeedsSync = true }
-        meetings[i].updatedAt = Date(); persist()
+        var updated = previous; change(&updated)
+        guard updated != previous else { return }
+        if previous.notes != updated.notes || previous.summary != updated.summary || previous.title != updated.title || previous.transcript != updated.transcript || previous.actions != updated.actions || previous.eventStart != updated.eventStart || previous.eventEnd != updated.eventEnd { updated.notionNeedsSync = true }
+        updated.updatedAt = Date(); meetings[i] = updated; searchCache[id] = nil; persist()
+    }
+    func updateTranscript(_ id: UUID, file: String, lines: [TranscriptLine]) {
+        guard loaded, let i = meetings.firstIndex(where: { $0.id == id }) else { return }
+        var meeting = meetings[i]
+        let merged = TranscriptMerge.replacing(meeting.transcript, file: file, with: lines)
+        guard meeting.transcript != merged else { return }
+        meeting.transcript = merged; meeting.updatedAt = Date(); meeting.notionNeedsSync = true
+        meetings[i] = meeting; searchCache[id] = nil; persist()
     }
     func persist() {
-        guard loaded else { return }
-        saveState = "Saving…"
-        saveTask?.cancel()
+        guard loaded else { return }; saveRevision += 1
+        if saveState != "Saving…" { saveState = "Saving…" }
+        // Coalesce, rather than indefinitely debounce continuous live speech.
+        guard saveTask == nil else { return }
         saveTask = Task { [weak self] in
-            do { try await Task.sleep(nanoseconds: 400_000_000) } catch { return }
-            self?.saveNow()
+            do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
+            guard let self else { return }; self.saveTask = nil
+            let revision = self.saveRevision
+            self.persistence.save(Archive(meetings: self.meetings)) { [weak self] error in
+                Task { @MainActor in
+                    guard let self, self.saveRevision == revision else { return }
+                    self.reportSave(error)
+                }
+            }
         }
+    }
+    private func reportSave(_ error: String?) {
+        if let error { saveState = "Save failed"; self.error = "Could not save: " + error }
+        else { saveState = "Saved on this Mac" }
     }
     func saveNow() {
         guard loaded else { return }
-        do {
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(Archive(meetings: meetings))
-            let target = root.appendingPathComponent("meetings.json")
-            if FileManager.default.fileExists(atPath: target.path) {
-                let previous = try Data(contentsOf: target)
-                try previous.write(to: root.appendingPathComponent("meetings.previous.json"), options: .atomic)
-            }
-            try data.write(to: target, options: .atomic)
-            saveState = "Saved on this Mac"
-        } catch { saveState = "Save failed"; self.error = "Could not save: \(error.localizedDescription)" }
+        saveTask?.cancel(); saveTask = nil; saveRevision += 1
+        do { try persistence.flush(Archive(meetings: meetings)); reportSave(nil) }
+        catch { reportSave(error.localizedDescription) }
     }
     func importText() {
         guard loaded else { error = "Resolve the data loading error before importing."; return }
@@ -122,6 +142,6 @@ import AppKit
     func deleteForever(_ id: UUID) {
         guard let m = meetings.first(where: { $0.id == id && $0.trashed }) else { return }
         for file in m.audioFiles { if let url = audioURL(file) { try? FileManager.default.removeItem(at: url) } }
-        meetings.removeAll { $0.id == id }; if selectedID == id { selectedID = nil }; persist()
+        meetings.removeAll { $0.id == id }; searchCache[id] = nil; if selectedID == id { selectedID = nil }; persist()
     }
 }

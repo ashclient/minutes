@@ -3,6 +3,7 @@ import datetime
 import json
 import pathlib
 import uuid
+import sys
 
 root = pathlib.Path.home() / "Library/Application Support/Minutes"
 root.mkdir(parents=True, exist_ok=True)
@@ -14,4 +15,6 @@ for index, title in enumerate(["Weekly product review", "Research & planning", "
                       notebook="Meetings", favorite=index == 0, trashed=False, audioFiles=[], transcript=[], actions=[],
                       notes="Check the feedback from this week.\nFollow up on the onboarding changes.",
                       summary="## Overview\nThe team reviewed the latest feedback, agreed on the next set of improvements, and planned a smaller release for next week.\n\n## What we discussed\n- Make the first-run experience easier to follow.\n- Keep the next release focused on the most common requests.\n- Share a draft with the team before the next review.\n\n## Next steps\n- Review the updated flow on Friday.\n- Collect feedback before the next meeting.", pipelineStatus="ready"))
+if "--long-transcript" in sys.argv:
+    notes[0]["transcript"] = [dict(id=str(uuid.uuid4()), seconds=i * 2, source="Microphone", text=f"Lecture segment {i}: preserve the concept, definition and its complete worked example.") for i in range(10000)]
 (root / "meetings.json").write_text(json.dumps(dict(version=1, meetings=notes)))

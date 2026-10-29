@@ -13,8 +13,9 @@ final class SpeechFeed: @unchecked Sendable {
     var receivedSeconds: Double { lock.lock(); defer { lock.unlock() }; return total }
     func append(_ buffer: AVAudioPCMBuffer) {
         lock.lock(); defer { lock.unlock() }
-        if let modern { modern(buffer) } else { request?.append(buffer) }
         let start = total; total += Double(buffer.frameLength) / buffer.format.sampleRate
+        if let modern { modern(buffer); return }
+        request?.append(buffer)
         // The capture worker gives us independently owned buffers.
         history.append((buffer, start, total))
         while let first = history.first, first.2 < total - 12 { history.removeFirst() }
@@ -43,6 +44,7 @@ final class SpeechFeed: @unchecked Sendable {
     private var ended = false
     private var failed = false
     private var token = UUID()
+    private let lineID = UUID()
     private var completed = ""
     private var current = LiveTextAccumulator()
     private var onText: (([TranscriptLine]) -> Void)?
@@ -110,7 +112,7 @@ final class SpeechFeed: @unchecked Sendable {
     }
     private func publish() {
         let text = TranscriptText.stitch(completed, current.text)
-        onText?(text.isEmpty ? [] : [TranscriptLine(seconds: 0, source: source, text: text)])
+        onText?(text.isEmpty ? [] : [TranscriptLine(id: lineID, seconds: 0, source: source, text: text)])
     }
     func stop() async -> Bool {
         if #available(macOS 26.0, *), let modern = modern as? TahoeSpeech {

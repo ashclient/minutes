@@ -30,6 +30,8 @@ struct CapturedPCM: @unchecked Sendable { let buffer: AVAudioPCMBuffer }
         module = transcriber
         analyzer = SpeechAnalyzer(modules: [transcriber])
     }
+    private var volatileID = UUID()
+    private var volatileSeconds = 0.0
     private func collect() throws {
         guard let module else { throw AppFailure("Apple speech was not prepared.") }
         results = Task {
@@ -37,9 +39,9 @@ struct CapturedPCM: @unchecked Sendable { let buffer: AVAudioPCMBuffer }
                 for try await result in module.results {
                     let text = String(result.text.characters)
                     if result.isFinal {
-                        finalized.append(TranscriptLine(seconds: timeOffset + result.range.start.seconds, source: source, text: text))
+                        finalized.append(TranscriptLine(id: volatileID, seconds: timeOffset + result.range.start.seconds, source: source, text: text)); volatileID = UUID()
                         volatile = ""
-                    } else { volatile = text }
+                    } else { volatile = text; volatileSeconds = timeOffset + result.range.start.seconds }
                     publish()
                 }
             } catch { failure = error.localizedDescription; throw error }
@@ -47,7 +49,7 @@ struct CapturedPCM: @unchecked Sendable { let buffer: AVAudioPCMBuffer }
     }
     private func publish() {
         var lines = finalized
-        if !volatile.isEmpty { lines.append(TranscriptLine(seconds: finalized.last?.seconds ?? timeOffset, source: source, text: volatile)) }
+        if !volatile.isEmpty { lines.append(TranscriptLine(id: volatileID, seconds: volatileSeconds, source: source, text: volatile)) }
         onText?(lines)
     }
     func start(feed: SpeechFeed, source: String = "Microphone", onText: @escaping ([TranscriptLine]) -> Void) async throws {

@@ -1,10 +1,10 @@
 import SwiftUI
 import AppKit
 
-struct NoteDocument: View {
+struct NoteDocument: View, Equatable {
     let text: String
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        LazyVStack(alignment: .leading, spacing: 7) {
             ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
                 if line.hasPrefix("#") {
                     Text(line.drop(while: { $0 == "#" || $0 == " " })).font(.system(size: 15, weight: .semibold)).padding(.top, 10)

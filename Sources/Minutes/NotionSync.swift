@@ -103,7 +103,7 @@ struct NotionClient {
     static let shared = NotionSync()
     @Published private(set) var syncing: Set<UUID> = []
     private var queued: Set<UUID> = []
-    func sync(id: UUID, store: Store) async {
+    func sync(id: UUID, store: Store, client suppliedClient: NotionClient? = nil) async {
         guard UserDefaults.standard.bool(forKey: "notionEnabled") else { return }
         if syncing.contains(id) { queued.insert(id); return }
         syncing.insert(id)
@@ -112,8 +112,9 @@ struct NotionClient {
             if queued.remove(id) != nil { Task { await self.sync(id: id, store: store) } }
         }
         do {
-            guard var meeting = store.meetings.first(where: { $0.id == id && !$0.trashed }) else { return }
-            let client = NotionClient(token: try CloudKey.read(service: "notion"))
+            guard var meeting = store.meetings.first(where: { $0.id == id && !$0.trashed }), meeting.notionSyncEnabled != false else { return }
+            let client: NotionClient
+            if let suppliedClient { client = suppliedClient } else { client = NotionClient(token: try CloudKey.read(service: "notion")) }
             let defaults = UserDefaults.standard
             let kind = meeting.notionParentKind ?? (meeting.notionPageID == nil ? defaults.string(forKey: "notionDestinationKind") ?? "page" : "database")
             let pageParent = kind != "database"
@@ -127,10 +128,11 @@ struct NotionClient {
                 meeting.notionPageID = page
                 store.update(id) { $0.notionPageID = page; $0.notionURL = response["url"] as? String; $0.notionParentKind = kind; $0.notionParentID = parentID }
                 store.saveNow() // Retain the page ID even if content upload is interrupted.
-            } else {
+            } else if kind != "existing" {
                 _ = try await client.call("pages/" + meeting.notionPageID!, method: "PATCH", body: ["properties": properties])
             }
-            let children = NotionClient.content(meeting, transcript: defaults.bool(forKey: "notionIncludeTranscript"))
+            var children = NotionClient.content(meeting, transcript: defaults.bool(forKey: "notionIncludeTranscript"))
+            if kind == "existing" { children.insert(NotionClient.block(meeting.title, type: "heading_2"), at: 0) }
             // Write native blocks directly on the page, in bounded batches.
             // Track owned IDs after each response so retries can clean up partial uploads.
             let oldIDs = Array(Set((meeting.notionBlockIDs ?? []) + [meeting.notionBlockID].compactMap { $0 }))

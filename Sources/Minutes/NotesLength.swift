@@ -1,6 +1,6 @@
 import Foundation
 
-enum NotesLength: String, Codable, CaseIterable, Identifiable {
+enum NotesLength: String, Codable, Sendable, CaseIterable, Identifiable {
     case brief, detailed, complete
     var id: String { rawValue }
     var title: String { switch self { case .brief: return "Brief"; case .detailed: return "Detailed"; case .complete: return "Full detail" } }

@@ -45,6 +45,33 @@ final class NotionClientTests: XCTestCase {
         let result = try await client().createDatabase(parent: "parent-id")
         XCTAssertEqual(result.source, "source-123")
     }
+    @MainActor func testAppendToExistingPageNeverRenamesOrReplacesOtherContent() async throws {
+        let defaults = UserDefaults.standard; let previous = defaults.object(forKey: "notionEnabled")
+        defaults.set(true, forKey: "notionEnabled")
+        defer { if let previous { defaults.set(previous, forKey: "notionEnabled") } else { defaults.removeObject(forKey: "notionEnabled") } }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = Store(root: folder); let id = try XCTUnwrap(store.create())
+        store.update(id) { $0.title = "New lecture"; $0.summary = "## Revenue\n- Keep the $25 example."; $0.notionSyncEnabled = true; $0.notionPageID = "existing-page"; $0.notionParentID = "existing-page"; $0.notionParentKind = "existing" }
+        var appended = 0, archived: [String] = []
+        NotionStub.reply = { request in
+            XCTAssertFalse(request.url!.path.contains("/pages/"), "Append must not change the destination page’s title/properties")
+            if request.url!.path == "/v1/blocks/existing-page/children" {
+                appended += 1
+                // The actual block count is title, heading and bullet.
+                return (200, Data("{\"results\":[{\"id\":\"owned-\(appended)-1\"},{\"id\":\"owned-\(appended)-2\"},{\"id\":\"owned-\(appended)-3\"},{\"id\":\"owned-\(appended)-4\"}]}".utf8))
+            }
+            archived.append(request.url!.lastPathComponent)
+            return (200, Data("{}".utf8))
+        }
+        let sync = NotionSync()
+        await sync.sync(id: id, store: store, client: client())
+        XCTAssertNil(store.meetings.first?.notionError)
+        XCTAssertEqual(store.meetings.first?.notionBlockIDs?.count, 4)
+        await sync.sync(id: id, store: store, client: client())
+        XCTAssertEqual(appended, 2); XCTAssertEqual(Set(archived), Set((1...4).map { "owned-1-\($0)" }))
+        XCTAssertEqual(store.meetings.first?.notionPageID, "existing-page")
+    }
     func testRejectedNotionKeySurfacesServerMessage() async {
         NotionStub.reply = { _ in (401, Data("{\"message\":\"API token is invalid.\"}".utf8)) }
         do { _ = try await client().call("users/me"); XCTFail("Expected rejection") }

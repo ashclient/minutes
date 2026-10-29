@@ -38,7 +38,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 if showCalendar {
                     MeetingCalendarView { event in openEvent(event) }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView { if let meeting { document(meeting).id(meeting.id) } else { welcome } }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ScrollViewReader { proxy in ScrollView { if let meeting { document(meeting).id(meeting.id) } else { welcome } }.onChange(of: transcriptOpen) { _, open in if open { proxy.scrollTo("transcript-section", anchor: .top) } } }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     footer
                 }
             }.background(Color(nsColor: .textBackgroundColor))
@@ -65,19 +65,24 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
         .onChange(of: store.selectedID) { _, _ in showCalendar = false; pane = meeting?.summary.isEmpty == false ? "AI notes" : "Notes"; recordingsOpen = false }
         .onChange(of: meeting?.notes) { _, _ in
             syncDelay?.cancel()
-            guard let note = meeting, note.notionPageID != nil, UserDefaults.standard.bool(forKey: "notionAutoSync") else { return }
+            guard let note = meeting, note.notionPageID != nil, note.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) else { return }
             syncDelay = Task {
                 do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch { return }
                 await notion.sync(id: note.id, store: store)
             }
         }
+        .task {
+            if ProcessInfo.processInfo.arguments.contains("--preview-transcript") {
+                try? await Task.sleep(nanoseconds: 400_000_000); transcriptOpen = true
+            }
+        }
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("--preview-calendar") { showCalendar = true }
-            if ProcessInfo.processInfo.arguments.contains("--preview-finish"), let id = store.selectedID { pipeline.finishID = id }
+            if ProcessInfo.processInfo.arguments.contains("--preview-finish") || ProcessInfo.processInfo.arguments.contains("--preview-delivery"), let id = store.selectedID { pipeline.finishID = id }
             if ProcessInfo.processInfo.arguments.contains("--preview-connections") || (ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-notion-destination")) || ProcessInfo.processInfo.arguments.contains("--preview-google") { openSettings("Connections") }
             if ProcessInfo.processInfo.arguments.contains("--preview-settings") { openSettings("General") }
-            if UserDefaults.standard.bool(forKey: "notionAutoSync") {
-                for note in store.meetings where !note.trashed && note.notionNeedsSync == true && (note.notionPageID != nil || note.calendarEventKey != nil) {
+            if UserDefaults.standard.bool(forKey: "notionEnabled") {
+                for note in store.meetings where !note.trashed && note.notionNeedsSync == true && note.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) && note.pipelineStatus != "awaitingNotes" && (note.notionPageID != nil || note.calendarEventKey != nil) {
                     Task { await notion.sync(id: note.id, store: store) }
                 }
             }
@@ -113,7 +118,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
     }
     private func openEvent(_ event: CalendarMeeting) {
         showCalendar = false
-        if let id = store.open(event) { Task { await notion.sync(id: id, store: store) } }
+        _ = store.open(event)
     }
     private func eventRow(_ event: CalendarMeeting) -> some View {
         Button { openEvent(event) } label: {
@@ -184,21 +189,13 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                     Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(note.finishedNotes, forType: .string) } label: { Label("Copy", systemImage: "doc.on.doc") }
                     Button { draft = note.finishedNotes; editingID = note.id } label: { Label("Edit", systemImage: "pencil") }.disabled(processingSelected)
                 }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary)
-                NoteDocument(text: note.finishedNotes)
+                NoteDocument(text: note.finishedNotes).equatable()
             }
             if !note.audioFiles.isEmpty { recordings(note) }
             if !note.transcript.isEmpty || recordingSelected {
                 DisclosureGroup("Transcript", isExpanded: $transcriptOpen) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        if note.transcript.isEmpty { Text("Listening…").font(.callout).foregroundStyle(.secondary) }
-                        ForEach(note.transcript) { line in
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack(spacing: 6) { Text(line.source).fontWeight(.medium); Text(line.timestamp).monospacedDigit().foregroundStyle(.tertiary) }.font(.system(size: 11)).foregroundStyle(.secondary)
-                                Text(line.text).font(.system(size: 14)).lineSpacing(5).textSelection(.enabled)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }.padding(.top, 14)
-                }.font(.system(size: 12, weight: .medium))
+                    if transcriptOpen { TranscriptListView(lines: note.transcript) }
+                }.font(.system(size: 12, weight: .medium)).id("transcript-section")
             }
             if !protected(note.id) { recovery(note) }
             if let error = note.notionError { HStack(alignment: .top) { Text(error).font(.caption).foregroundStyle(.secondary); Spacer(); Button("Retry Notion") { sync(note.id) }.font(.caption) } }
@@ -228,7 +225,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
         VStack(spacing: 10) {
             if recorder.recording && !pipeline.working {
                 if recorder.meetingID != store.selectedID { Button { store.selectedID = recorder.meetingID } label: { HStack { Image(systemName: "arrow.turn.up.left"); Text("Return to recording"); Spacer(); Text(store.meetings.first { $0.id == recorder.meetingID }?.title ?? "").lineLimit(1) }.font(.system(size: 11)).foregroundStyle(.secondary) }.buttonStyle(.plain) }
-                HStack(spacing: 18) { sourceMeter("Mic", icon: recorder.microphoneMuted ? "mic.slash" : "mic", level: recorder.level, help: recorder.inputName); if recorder.computerEnabled { sourceMeter("Computer", icon: "speaker.wave.2", level: recorder.computerLevel, help: recorder.computerStatus) }; Spacer(minLength: 0) }
+                RecordingSourceMeters(meters: recorder.meters, muted: recorder.microphoneMuted, computer: recorder.computerEnabled, input: recorder.inputName, status: recorder.computerStatus)
                 RecordingControls()
                 if let failure = recorder.failure { Text(failure).font(.caption).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading) }
             } else if pipeline.working {
@@ -254,7 +251,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
     private func sectionLabel(_ text: String) -> some View { Text(text).font(.system(size: 11, weight: .medium)).foregroundStyle(.tertiary) }
     private func eventTime(_ date: Date) -> String { Calendar.current.isDateInToday(date) ? "Today · " + date.formatted(date: .omitted, time: .shortened) : date.formatted(.dateTime.weekday(.abbreviated).hour().minute()) }
     private func openSettings(_ tab: String) { setup = SettingsRoute(tab: tab) }
-    private func sync(_ id: UUID) { if UserDefaults.standard.bool(forKey: "notionEnabled") { Task { await notion.sync(id: id, store: store) } } else { openSettings("Connections") } }
+    private func sync(_ id: UUID) { if UserDefaults.standard.bool(forKey: "notionEnabled") { store.update(id) { $0.notionSyncEnabled = true }; Task { await notion.sync(id: id, store: store) } } else { openSettings("Connections") } }
     private func importAudio() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.audio]
         guard panel.runModal() == .OK, let url = panel.url else { return }

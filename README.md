@@ -1,4 +1,4 @@
-# Minutes 1.8
+# Minutes 1.9
 
 Native Mac meeting notes. macOS 14+; the direct long-form Apple speech engine needs macOS Tahoe 26 on supported hardware.
 
@@ -6,10 +6,10 @@ Native Mac meeting notes. macOS 14+; the direct long-form Apple speech engine ne
 
 1. Choose an upcoming Google Calendar event on the left, or click Blank note. A meeting opens with the event name and time. Clicking that event again reopens the same note; recurring occurrences have separate notes.
 2. Type in Your notes, or choose Microphone / Mic + computer and click Record this meeting. Recording adds a take to the selected meeting rather than unexpectedly creating a different note. You can keep writing or browse another note.
-3. Click Finish meeting. After the recording is saved, choose Brief, Detailed, or Full detail (the default), then Make notes. Transcript only skips AI; Decide later keeps the recording for later. Apple finishes the transcript and your selected AI provider writes notes if connected. Your writing, generated notes, expandable transcript and recording player are all on one page. To append another take, record in that same meeting again.
-4. Open in Notion opens its linked Notion page. Connected meetings create one page with the event title plus a real date mention. Finished notes update the same page. Typed changes sync after a short delay when auto-sync is on. A saved pending sync is retried next time Minutes opens.
+3. Click Finish meeting. After the recording is saved, choose Brief, Detailed, or Full detail (the default), then Next. Choose local-only, a new Notion page, the linked page, or an existing page; then Make notes. Transcript only skips AI but still lets you choose a destination; Decide later keeps the recording for later. Apple finishes the transcript and your selected AI provider writes notes if connected. Your writing, generated notes, expandable transcript and recording player are all on one page. To append another take, record in that same meeting again.
+4. Open in Notion opens its linked Notion page. The finish screen asks whether to sync each meeting and where. Calendar clicks open a local note without creating a Notion page prematurely. New Notion pages use the event title plus a real date mention; append mode leaves the destination title and existing blocks intact. Finished notes update the same page. Typed changes sync after a short delay when auto-sync is on. A saved pending sync is retried next time Minutes opens.
 
-The recording controls are labeled Mute, Pause/Resume, and Finish meeting. Mute affects only the microphone. Pause omits incoming audio from both tracks and pauses the timer. Switching apps shows smaller floating controls with an audio-responsive waveform. Drag the dotted handle to move them; use the chevron to collapse or expand. Pause freezes the waveform and silence makes it flat. Expand Recordings for playback, seeking and speed. The note menu offers export, re-transcription, Notion sync and recording management.
+The recording controls are labeled Mute, Pause/Resume, and Finish meeting. Mute affects only the microphone. Pause omits incoming audio from both tracks and pauses the timer. Switching apps shows smaller floating controls with an audio-responsive waveform. Drag the dotted handle to move them; use the chevron to collapse or expand. Drop the panel beyond an outer screen edge to dock it as a tiny arrow, then click the arrow to restore it. Shared display boundaries do not trigger docking. Pause freezes the waveform and silence makes it flat. Expand Recordings for playback, seeking and speed. The note menu offers export, re-transcription, Notion sync and recording management.
 
 ## Calendar and detail levels
 
@@ -66,3 +66,9 @@ Replacing Minutes.app preserves ~/Library/Application Support/Minutes. Copy that
 Build source using the macOS 26 SDK: bash build.command. Full Xcode is needed for MINUTES_RUN_TESTS=1. GitHub Actions builds Apple Silicon and Intel, runs core and XCTest checks, verifies the ad-hoc signature and captures the native workspace. The app is not Developer ID notarized.
 
 Real Google/Notion sign-in, ScreenCaptureKit permissions and live audio still require testing with the user's accounts and hardware. Automated checks use synthetic audio, local storage and mocked network responses; they do not establish end-to-end account behavior.
+
+## Long-recording performance
+
+Audio levels and the clock publish into a separate small observable model, so they do not invalidate the document eight times per second. Transcript updates coalesce over 350 ms and flush before stop/quit; final and provisional rows retain stable identities. Ordered track merging replaces repeated full sorting. The expanded transcript initially renders the latest 200 segments, with earlier segments accessible in batches; the complete text remains saved and is used for AI/export. Long generated notes render lazily. Autosave runs at most once per second while changes continue, with JSON encoding and atomic disk/backup work on a serial utility queue. Explicit Save/Quit flushes stay ordered with pending background writes.
+
+A local-only selection disables automatic sync for that meeting. Choosing an existing page adds only this meeting's owned blocks and never renames that page. Retries update the same owned section. Changing the destination starts fresh block ownership and leaves the old destination untouched.

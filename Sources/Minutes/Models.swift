@@ -1,11 +1,11 @@
 import Foundation
 
-struct ActionItem: Identifiable, Codable, Equatable {
+struct ActionItem: Sendable, Identifiable, Codable, Equatable {
     var id = UUID()
     var text: String
     var done = false
 }
-struct TranscriptLine: Identifiable, Codable, Equatable {
+struct TranscriptLine: Sendable, Identifiable, Codable, Equatable {
     var id = UUID()
     var seconds: Double
     var source: String
@@ -13,7 +13,7 @@ struct TranscriptLine: Identifiable, Codable, Equatable {
     var text: String
     var timestamp: String { String(format: "%02d:%02d", Int(seconds) / 60, Int(seconds) % 60) }
 }
-struct Meeting: Identifiable, Codable, Equatable {
+struct Meeting: Sendable, Identifiable, Codable, Equatable {
     var id = UUID()
     var title = "Untitled meeting"
     var createdAt = Date()
@@ -43,6 +43,7 @@ struct Meeting: Identifiable, Codable, Equatable {
     var notionParentKind: String? = nil
     var notionParentID: String? = nil
     var notionNeedsSync: Bool? = nil
+    var notionSyncEnabled: Bool? = nil
     var favorite = false
     var trashed = false
     var transcriptText: String { transcript.map { "[\($0.timestamp)] \($0.source): \($0.text)" }.joined(separator: "\n") }
@@ -51,7 +52,7 @@ struct Meeting: Identifiable, Codable, Equatable {
         "# \(title)\n\n\(createdAt.formatted()) · \(notebook)\n\n## Notes\n\n\(notes)\n\n## Summary\n\n\(summary)\n\n## Action items\n\n" + actions.map { "- [\($0.done ? "x" : " ")] \($0.text)" }.joined(separator: "\n") + "\n\n## Transcript\n\n\(transcriptText)\n"
     }
 }
-struct Archive: Codable {
+struct Archive: Sendable, Codable {
     var version = 1
     var meetings: [Meeting]
 }
