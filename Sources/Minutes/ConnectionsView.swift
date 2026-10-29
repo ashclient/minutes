@@ -3,112 +3,66 @@ import AppKit
 
 @MainActor struct AppSettingsView: View {
     let initialTab: String
+    @Environment(\.dismiss) private var dismiss
     @State private var tab = "General"
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Settings", selection: $tab) { Text("General").tag("General"); Text("Connections").tag("Connections") }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.top, 20)
-            ScrollView { if tab == "General" { SettingsView() } else { ConnectionsView() } }.frame(maxHeight: 650)
-        }.frame(width: 540).onAppear { tab = initialTab }
+            HStack { Text("Settings").font(.system(size: 15, weight: .semibold)); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 15)
+            Picker("Settings", selection: $tab) { Text("General").tag("General"); Text("Connections").tag("Connections") }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.bottom, 18)
+            Divider()
+            ScrollView { if tab == "General" { SettingsView() } else { ConnectionsView() } }
+        }.frame(width: 540, height: 560).onAppear { tab = initialTab }
     }
 }
 @MainActor struct ConnectionsView: View {
     @EnvironmentObject var calendar: CalendarMeetings
-    @Environment(\.dismiss) private var dismiss
     @AppStorage("notionEnabled") private var notionEnabled = false
     @AppStorage("notionAutoSync") private var autoSync = true
     @AppStorage("notionIncludeTranscript") private var includeTranscript = false
-    @State private var token = ""
-    @State private var destination = UserDefaults.standard.string(forKey: "notionDestination") ?? ""
-    @State private var existing = UserDefaults.standard.string(forKey: "notionSource") != nil
-    @State private var working = false
-    @State private var message = ""
-    @State private var error = false
-    @State private var showCalendars = false
-    @State private var googleSetup = false
-    @State private var connectionExpanded = false
+    @State private var google = false
+    @State private var notion = false
+    @State private var calendars = false
+    @State private var syncOptions = false
+    @State private var error = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack { Text("Connections").font(.title3).fontWeight(.semibold); Spacer(); Button("Done") { dismiss() } }
-            Label("Google Calendar", systemImage: "calendar").font(.system(size: 14, weight: .semibold))
-            Text("Connect the Google account you use in Notion Calendar. Click a meeting in the sidebar to open its note.").font(.callout).foregroundStyle(.secondary)
-            HStack {
-                Button(calendar.signingIn ? "Waiting for Google…" : calendar.authorized ? "Reconnect Google" : "Connect Google") { Task { await calendar.connect() } }.disabled(calendar.signingIn || !calendar.configured)
-                if calendar.signingIn { Button("Cancel") { calendar.cancelSignIn() } }
-                if calendar.authorized { Button("Refresh") { calendar.refresh() }.disabled(calendar.refreshing); Button("Disconnect") { calendar.disconnect() }.buttonStyle(.plain).foregroundStyle(.secondary) }
-            }
-            Text(calendar.message).font(.caption).foregroundStyle(.secondary)
-            DisclosureGroup(calendar.configured ? "Google app setup" : "Set up Google sign-in once", isExpanded: $googleSetup) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("This private build needs a Google Desktop OAuth client. Enable the Google Calendar API in your Google Cloud project, configure the consent screen with your account as a test user, then create a Desktop app OAuth client and download its JSON file.").font(.caption).foregroundStyle(.secondary)
-                    Link("Google OAuth clients ↗", destination: URL(string: "https://console.cloud.google.com/auth/clients")!).font(.caption)
-                    Button("Import Google client JSON…") { importGoogleClient() }
-                    Text("Sign-in opens your browser. Calendar access is read-only. Credentials and tokens stay in macOS Keychain.").font(.caption).foregroundStyle(.secondary)
-                }.padding(.top, 8)
-            }.font(.caption)
-            if calendar.authorized {
-                DisclosureGroup("Choose Google calendars", isExpanded: $showCalendars) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(calendar.calendars, id: \.id) { item in
-                            Toggle(item.title, isOn: Binding(get: { !(UserDefaults.standard.stringArray(forKey: "hiddenGoogleCalendars") ?? []).contains(item.id) }, set: { value in
-                                var hidden = Set(UserDefaults.standard.stringArray(forKey: "hiddenGoogleCalendars") ?? [])
-                                if value { hidden.remove(item.id) } else { hidden.insert(item.id) }
-                                UserDefaults.standard.set(Array(hidden), forKey: "hiddenGoogleCalendars"); calendar.refresh()
-                            }))
-                        }
-                    }.padding(.top, 8)
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Two connections. One meeting page.").font(.system(size: 17, weight: .semibold))
+            Text("Google supplies your upcoming meetings. Notion keeps the finished notes. Both are optional.").font(.system(size: 12)).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 15) {
+                HStack { Label("Google Calendar", systemImage: "calendar").font(.system(size: 14, weight: .medium)); Spacer(); if calendar.authorized { Label("Connected", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) } }
+                Text(calendar.authorized ? calendar.message : "See your meetings in the sidebar.").font(.system(size: 12)).foregroundStyle(.secondary)
+                HStack {
+                    // Always actionable: missing app credentials open setup instead of disabling it.
+                    Button(calendar.authorized ? "Manage Google connection" : "Connect Google") { google = true }.buttonStyle(.bordered)
+                    if calendar.authorized { Button("Refresh") { calendar.refresh() }.disabled(calendar.refreshing); Spacer(); Button("Disconnect") { calendar.disconnect() }.buttonStyle(.plain).foregroundStyle(.secondary) }
                 }.font(.caption)
-            }
-            Divider().padding(.vertical, 4)
-            Label("Notion", systemImage: "square.stack").font(.system(size: 14, weight: .semibold))
-            Text("Choose a Notion page to keep your meeting notes in. Clicking a calendar event creates one child page named after that event, with a date mention. Finishing the meeting updates that same page.").font(.callout).foregroundStyle(.secondary)
-            if notionEnabled { Label("Connected", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) }
-            DisclosureGroup(notionEnabled ? "Change connection" : "Set up Notion", isExpanded: Binding(get: { !notionEnabled || connectionExpanded }, set: { connectionExpanded = $0 })) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("1. Create an internal connection in Notion with read, insert, and update access. Copy its secret below.").font(.caption).foregroundStyle(.secondary)
-                    Link("Create a Notion connection ↗", destination: URL(string: "https://www.notion.so/profile/integrations")!).font(.caption)
-                    SecureField(notionEnabled ? "New secret (leave blank to keep saved key)" : "Notion connection secret", text: $token).textFieldStyle(.roundedBorder)
-                    Text("2. Open the parent page or database in Notion → ••• → Connections → add your connection. Copy its link below.").font(.caption).foregroundStyle(.secondary)
-                    Picker("Destination", selection: $existing) { Text("A Notion parent page").tag(false); Text("Use an existing database").tag(true) }.font(.caption)
-                    TextField(existing ? "Notion database link" : "Notion parent page link", text: $destination).textFieldStyle(.roundedBorder)
-                    Button(working ? "Connecting…" : notionEnabled ? "Update connection" : "Connect Notion") { Task { await connectNotion() } }.disabled(working || destination.isEmpty || (!notionEnabled && token.isEmpty))
-                }.padding(.top, 10)
-            }
-            if notionEnabled {
-                Toggle("Sync automatically after making notes", isOn: $autoSync).font(.callout)
-                Toggle("Include the transcript in Notion", isOn: $includeTranscript).font(.callout)
-                Text("Minutes updates its own meeting-notes section. Keep edits you make directly in Notion outside that section.").font(.caption).foregroundStyle(.secondary)
-                HStack { if let raw = UserDefaults.standard.string(forKey: "notionDatabaseURL"), let url = URL(string: raw) { Link("Open database ↗", destination: url) }; Spacer(); Button("Disconnect Notion") { do { try CloudKey.save("", service: "notion"); notionEnabled = false } catch { message = error.localizedDescription; self.error = true } } }.font(.caption)
-            }
-            if !message.isEmpty { Text(message).font(.caption).foregroundStyle(error ? Color.red : Color.secondary) }
-            Text("Once connected: choose an event → write or record → finish the meeting. Open in Notion takes you to its saved page.").font(.caption).foregroundStyle(.secondary)
+                if calendar.authorized {
+                    DisclosureGroup("Choose calendars", isExpanded: $calendars) {
+                        VStack(alignment: .leading, spacing: 9) {
+                            ForEach(calendar.calendars, id: \.id) { item in
+                                Toggle(item.title, isOn: Binding(get: { !(UserDefaults.standard.stringArray(forKey: "hiddenGoogleCalendars") ?? []).contains(item.id) }, set: { value in
+                                    var hidden = Set(UserDefaults.standard.stringArray(forKey: "hiddenGoogleCalendars") ?? [])
+                                    if value { hidden.remove(item.id) } else { hidden.insert(item.id) }
+                                    UserDefaults.standard.set(Array(hidden), forKey: "hiddenGoogleCalendars"); calendar.refresh()
+                                }))
+                            }
+                        }.padding(.top, 10)
+                    }.font(.caption)
+                }
+            }.padding(16).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 15) {
+                HStack { Label("Notion", systemImage: "doc.text").font(.system(size: 14, weight: .medium)); Spacer(); if notionEnabled { Label("Connected", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) } }
+                Text(notionEnabled ? "Meetings save to " + (UserDefaults.standard.string(forKey: "notionDestinationTitle") ?? "your selected Notion destination") + "." : "Give each meeting its own Notion page.").font(.system(size: 12)).foregroundStyle(.secondary)
+                HStack { Button(notionEnabled ? "Change Notion page" : "Connect Notion") { notion = true }.buttonStyle(.bordered); Spacer(); if notionEnabled { Button("Disconnect") { do { try CloudKey.save("", service: "notion"); notionEnabled = false } catch { self.error = error.localizedDescription } }.buttonStyle(.plain).foregroundStyle(.secondary) } }.font(.caption)
+                if notionEnabled {
+                    DisclosureGroup("Sync options", isExpanded: $syncOptions) {
+                        VStack(alignment: .leading, spacing: 10) { Toggle("Save notes automatically", isOn: $autoSync); Toggle("Include transcript", isOn: $includeTranscript); Text("Keep edits made directly in Notion outside the section managed by Minutes.").font(.caption).foregroundStyle(.secondary) }.padding(.top, 9)
+                    }.font(.caption)
+                }
+            }.padding(16).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
         }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { if !calendar.configured { googleSetup = true } }
-    }
-    private func importGoogleClient() {
-        let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try calendar.importClient(Data(contentsOf: url)); googleSetup = false }
-        catch { calendar.message = error.localizedDescription }
-    }
-    private func connectNotion() async {
-        working = true; message = ""; error = false
-        defer { working = false }
-        do {
-            let key = token.trimmingCharacters(in: .whitespacesAndNewlines)
-            let client = NotionClient(token: key.isEmpty ? try CloudKey.read(service: "notion") : key)
-            let id = try NotionClient.identifier(destination)
-            let defaults = UserDefaults.standard
-            if existing {
-                let resolved = try await client.resolveDatabase(id)
-                defaults.set(resolved.source, forKey: "notionSource"); defaults.set(resolved.title, forKey: "notionTitleProperty"); defaults.set(resolved.date, forKey: "notionDateProperty"); defaults.set(resolved.url, forKey: "notionDatabaseURL")
-            } else {
-                _ = try await client.call("pages/" + id)
-                defaults.set(id, forKey: "notionParentPage")
-            }
-            defaults.set(existing ? "database" : "page", forKey: "notionDestinationKind")
-            if !key.isEmpty { try CloudKey.save(key, service: "notion") }
-            defaults.set(destination, forKey: "notionDestination"); notionEnabled = true; token = ""
-            message = "Connected. Click an upcoming meeting to create its linked page."
-        } catch { message = error.localizedDescription; self.error = true }
+        .sheet(isPresented: $google) { GoogleSetup().environmentObject(calendar) }
+        .sheet(isPresented: $notion) { NotionSetup() }
     }
 }

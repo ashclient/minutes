@@ -161,20 +161,23 @@ import AVFoundation
                 throw AppFailure("The microphone received audio for \(Int(recorder.voicedDuration)) seconds, but Apple recognized only \(wordCount) words. The transcript is incomplete. Check the speech language and macOS Sound input, or paste a corrected transcript in Details. Your audio and notes are saved.")
             }
         }
-        guard UserDefaults.standard.bool(forKey: "openRouterEnabled") else {
+        let usingApple = NotesAIProvider.selected == .apple
+        if !usingApple && !UserDefaults.standard.bool(forKey: "openRouterEnabled") {
             state("needsKey", "Recording and transcript saved. Connect AI if you’d like a summary.", id: id, store: store)
             if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await NotionSync.shared.sync(id: id, store: store) } }
             return
         }
-        let key = try CloudKey.read()
-        guard !key.isEmpty else {
+        let key = usingApple ? "" : try CloudKey.read()
+        if !usingApple && key.isEmpty {
             state("needsKey", "Recording and transcript saved. Add your AI key for a summary.", id: id, store: store)
             if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await NotionSync.shared.sync(id: id, store: store) } }
             return
         }
         state("generating", "Writing your notes…", id: id, store: store)
         let source = ["USER NOTES:\n" + meeting.notes, "TRANSCRIPT:\n" + meeting.transcriptText].filter { !$0.isEmpty }.joined(separator: "\n\n")
-        let result = try await AIClient(apiKey: key).summarize(source, progress: { text in self.message = text; store.progress = text })
+        let result: SummaryResult
+        if usingApple { result = try await AppleNotesAI.summarize(source, progress: { text in self.message = text; store.progress = text }) }
+        else { result = try await AIClient(apiKey: key).summarize(source, progress: { text in self.message = text; store.progress = text }) }
         try Task.checkCancellation()
         store.update(id) { $0.apply(result, originalTitle: meeting.title) }
         stage = "ready"; message = "Notes ready"

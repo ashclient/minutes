@@ -38,7 +38,7 @@ import UniformTypeIdentifiers
             }.background(Color(nsColor: .textBackgroundColor))
         }.tint(Color.primary)
         .sheet(isPresented: $setup, onDismiss: {
-            if UserDefaults.standard.bool(forKey: "openRouterEnabled"), let meeting, meeting.pipelineStatus == "needsKey", processingAvailable { pipeline.resume(id: meeting.id, store: store, recorder: recorder) }
+            if (UserDefaults.standard.bool(forKey: "openRouterEnabled") || (NotesAIProvider.selected == .apple && AppleAIAvailability.current.available)), let meeting, meeting.pipelineStatus == "needsKey", processingAvailable { pipeline.resume(id: meeting.id, store: store, recorder: recorder) }
         }) { AppSettingsView(initialTab: settingsTab).environmentObject(calendar) }
         .sheet(isPresented: Binding(get: { detailsID != nil }, set: { if !$0 { detailsID = nil } })) {
             if let id = detailsID { DetailsView(id: id).environmentObject(store).environmentObject(recorder).environmentObject(pipeline) }
