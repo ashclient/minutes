@@ -67,7 +67,7 @@ enum CalendarMode: String, CaseIterable { case day = "Day", week = "Week", month
                     Button { open(event) } label: {
                         HStack(alignment: .top, spacing: 14) {
                             RoundedRectangle(cornerRadius: 2).fill(event.color).frame(width: 4)
-                            VStack(alignment: .leading, spacing: 5) { Text(event.title).fontWeight(.medium); Text((mode == .agenda ? event.start.formatted(.dateTime.weekday(.abbreviated).month().day()) + " · " : "") + event.calendar + " · " + (event.allDay ? "All day" : event.start.formatted(date: .omitted, time: .shortened) + " – " + event.end.formatted(date: .omitted, time: .shortened))).font(.caption).foregroundStyle(.secondary) }
+                            VStack(alignment: .leading, spacing: 5) { Text(event.title).fontWeight(.medium); Text(eventSubtitle(event)).font(.caption).foregroundStyle(.secondary) }
                             Spacer()
                             if store.meetings.contains(where: { $0.calendarEventKey == event.id && !$0.trashed }) { Image(systemName: "doc.text").help("Meeting note exists") }
                             Image(systemName: "arrow.up.right").foregroundStyle(.secondary)
@@ -80,6 +80,11 @@ enum CalendarMode: String, CaseIterable { case day = "Day", week = "Week", month
             if let raw = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--calendar-layout=") }), let value = CalendarMode(rawValue: String(raw.dropFirst("--calendar-layout=".count))) { mode = value }
             calendar.loadMonth(month)
         }
+    }
+    private func eventSubtitle(_ event: CalendarMeeting) -> String {
+        let date = mode == .agenda ? event.start.formatted(.dateTime.weekday(.abbreviated).month().day()) + " · " : ""
+        let time = event.allDay ? "All day" : event.start.formatted(date: .omitted, time: .shortened) + " – " + event.end.formatted(date: .omitted, time: .shortened)
+        return date + event.calendar + " · " + time
     }
     private func move(_ amount: Int) { if let next = Calendar.current.date(byAdding: mode == .month || mode == .agenda ? .month : .day, value: mode == .week ? amount * 7 : amount, to: selected) { month = next; selected = next; calendar.loadMonth(next) } }
     private func day(_ date: Date, height: CGFloat) -> some View {
