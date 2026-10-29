@@ -10,6 +10,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
     @EnvironmentObject var pipeline: MeetingPipeline
     @EnvironmentObject var calendar: CalendarMeetings
     @ObservedObject private var notion = NotionSync.shared
+    @ObservedObject private var updater = AppUpdater.shared
     @AppStorage("includeComputer") private var includeComputer = false
     @State private var sidebar = true
     @State private var showCalendar = false
@@ -140,6 +141,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 Button { store.selectedID = id; showCalendar = false } label: { Label(pipeline.stage == "failed" ? "Notes need attention" : "Processing paused", systemImage: "exclamationmark.circle").font(.system(size: 11)).padding(8) }.buttonStyle(QuietButtonStyle())
             }
             if !notion.syncing.isEmpty { HStack { ActivityPulse(); Text("Syncing to Notion…").font(.system(size: 11)); Spacer(); ProgressView().controlSize(.mini) }.padding(.horizontal, 10) }
+            if updater.available != nil { Button { openSettings("General") } label: { Label("Minutes update available", systemImage: "arrow.down.circle").font(.system(size: 11)).padding(8) }.buttonStyle(QuietButtonStyle()) }
             if calendar.monthLoading { HStack { ProgressView().controlSize(.mini); Text("Loading calendar…").font(.system(size: 11)) }.padding(.horizontal, 10) }
         }.padding(.horizontal, 10).padding(.bottom, pipeline.working || recorder.recording || !notion.syncing.isEmpty || calendar.monthLoading ? 10 : 0)
     }
@@ -225,7 +227,9 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             }
             if !note.audioFiles.isEmpty || !note.transcript.isEmpty || recordingSelected { sourceCard(note) }
             if !protected(note.id) { recovery(note) }
-            if let error = note.notionError { HStack(alignment: .top) { Text(error).font(.caption).foregroundStyle(.secondary); Spacer(); Button("Retry Notion") { sync(note.id) }.font(.caption) } }
+            if let error = note.notionError { HStack(alignment: .top) { Text(error).font(.caption).foregroundStyle(.secondary); Spacer(); if error.hasPrefix("Notion edits detected.") {
+                    Button("Preserve edits & add copy") { store.update(note.id) { $0.notionBlockIDs = []; $0.notionBlockID = nil; $0.notionSyncedAt = nil }; sync(note.id) }.font(.caption)
+                } else { Button("Retry Notion") { sync(note.id) }.font(.caption) } } }
             if note.notionSyncEnabled == false { Text("Notion sync is off for this meeting.").font(.system(size: 10)).foregroundStyle(.tertiary) }
             else if notion.syncing.contains(note.id) { Label("Saving to Notion…", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary) }
             else if let date = note.notionSyncedAt { Text("Saved to Notion · " + date.formatted(date: .omitted, time: .shortened)).font(.system(size: 10)).foregroundStyle(.tertiary) }

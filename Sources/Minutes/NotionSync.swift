@@ -11,6 +11,11 @@ private actor NotionThrottle {
         try Task.checkCancellation()
     }
 }
+struct NotionHTTPError: LocalizedError {
+    let status: Int
+    let message: String
+    var errorDescription: String? { "Notion: " + message }
+}
 struct NotionClient {
     let token: String
     var session: URLSession = .shared
@@ -25,7 +30,7 @@ struct NotionClient {
         let (data, response) = try await session.data(for: request)
         let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
-            throw AppFailure("Notion: " + (object["message"] as? String ?? "Could not connect. Check your key and page access."))
+            throw NotionHTTPError(status: (response as? HTTPURLResponse)?.statusCode ?? 0, message: object["message"] as? String ?? "Could not connect. Check your key and page access.")
         }
         return object
     }
@@ -109,7 +114,7 @@ struct NotionClient {
         syncing.insert(id)
         defer {
             syncing.remove(id)
-            if queued.remove(id) != nil { Task { await self.sync(id: id, store: store) } }
+            if queued.remove(id) != nil { Task { await self.sync(id: id, store: store, client: suppliedClient) } }
         }
         let deliveryRevision = store.meetings.first { $0.id == id }?.notionDeliveryRevision
         func currentDelivery() -> Bool {
@@ -120,6 +125,20 @@ struct NotionClient {
             guard var meeting = store.meetings.first(where: { $0.id == id && !$0.trashed }), currentDelivery() else { return }
             let client: NotionClient
             if let suppliedClient { client = suppliedClient } else { client = NotionClient(token: try CloudKey.read(service: "notion")) }
+            // Check owned content before writing any page properties or replacements.
+            // Unmanaged blocks on an existing page are never inspected or replaced.
+            if let syncedAt = meeting.notionSyncedAt {
+                let owned = Set((meeting.notionBlockIDs ?? []) + [meeting.notionBlockID].compactMap { $0 })
+                for blockID in owned {
+                    guard currentDelivery() else { return }
+                    do {
+                        if try await editedInNotion(blockID, since: syncedAt, client: client) {
+                            throw AppFailure("Notion edits detected. Your Notion changes were kept. Choose Preserve edits & add copy to append the latest local notes.")
+                        }
+                    } catch let error as NotionHTTPError where error.status == 404 { continue }
+                }
+            }
+            guard currentDelivery() else { return }
             let defaults = UserDefaults.standard
             let kind = meeting.notionParentKind ?? (meeting.notionPageID == nil ? defaults.string(forKey: "notionDestinationKind") ?? "page" : "database")
             let pageParent = kind != "database"
@@ -159,7 +178,8 @@ struct NotionClient {
             // Only archive blocks previously written by Minutes. Keep other edits.
             for old in oldIDs {
                 guard currentDelivery() else { return }
-                _ = try await client.call("blocks/" + old, method: "PATCH", body: ["archived": true])
+                do { _ = try await client.call("blocks/" + old, method: "PATCH", body: ["archived": true]) }
+                catch let error as NotionHTTPError where error.status == 404 { /* Already removed in Notion. */ }
                 guard currentDelivery() else { return }
                 store.update(id) { $0.notionBlockIDs?.removeAll { $0 == old }; if $0.notionBlockID == old { $0.notionBlockID = nil } }; store.saveNow()
             }
@@ -169,4 +189,25 @@ struct NotionClient {
             }; store.saveNow()
         } catch { if currentDelivery() { store.update(id) { $0.notionError = error.localizedDescription } } }
     }
+    private func editedInNotion(_ id: String, since date: Date, client: NotionClient, depth: Int = 0) async throws -> Bool {
+        if depth > 8 { return true }
+        let block = try await client.call("blocks/" + id)
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions.insert(.withFractionalSeconds)
+        if let raw = block["last_edited_time"] as? String,
+           let edited = formatter.date(from: raw) ?? ISO8601DateFormatter().date(from: raw), edited > date { return true }
+        if block["has_children"] as? Bool == true {
+            var cursor: String?
+            repeat {
+                let suffix = cursor.map { "?start_cursor=" + ($0.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0) } ?? ""
+                let page = try await client.call("blocks/" + id + "/children" + suffix)
+                for child in page["results"] as? [[String: Any]] ?? [] {
+                    guard let childID = child["id"] as? String else { return true }
+                    if try await editedInNotion(childID, since: date, client: client, depth: depth + 1) { return true }
+                }
+                cursor = page["has_more"] as? Bool == true ? page["next_cursor"] as? String : nil
+            } while cursor != nil
+        }
+        return false
+    }
+
 }

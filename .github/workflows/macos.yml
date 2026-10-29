@@ -1,7 +1,7 @@
 name: Build Minutes for Mac
 on: [push, pull_request, workflow_dispatch]
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: macos-26
@@ -17,8 +17,12 @@ jobs:
       - name: Verify and package app
         run: |
           lipo dist/Minutes.app/Contents/MacOS/Minutes -verify_arch arm64 x86_64
+          lipo dist/Minutes.app/Contents/Helpers/MinutesUpdateHelper -verify_arch arm64 x86_64
           codesign --verify --deep --strict dist/Minutes.app
           ditto -c -k --sequesterRsrc --keepParent dist/Minutes.app dist/Minutes-App.zip
+      - name: Smoke test updater replacement and relaunch
+        run: |
+          python3 Checks/update_smoke.py
       - name: Capture UI preview
         continue-on-error: true
         run: |
@@ -50,3 +54,16 @@ jobs:
           name: Minutes-App
           path: dist/Minutes-App.zip
           if-no-files-found: error
+      - name: Publish versioned GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' dist/Minutes.app/Contents/Info.plist)
+          tag="v$version"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Version already published; keeping its assets immutable."
+          else
+            shasum -a 256 dist/Minutes-App.zip > dist/SHA256SUMS.txt
+            gh release create "$tag" dist/Minutes-App.zip dist/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Minutes $version" --notes-file RELEASE_NOTES.md
+          fi

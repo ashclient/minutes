@@ -61,6 +61,7 @@ final class NotionClientTests: XCTestCase {
                 // The actual block count is title, heading and bullet.
                 return (200, Data("{\"results\":[{\"id\":\"owned-\(appended)-1\"},{\"id\":\"owned-\(appended)-2\"},{\"id\":\"owned-\(appended)-3\"},{\"id\":\"owned-\(appended)-4\"}]}".utf8))
             }
+            if request.httpMethod == "GET" { return (200, Data("{\"last_edited_time\":\"2000-01-01T00:00:00Z\"}".utf8)) }
             archived.append(request.url!.lastPathComponent)
             return (200, Data("{}".utf8))
         }
@@ -71,6 +72,40 @@ final class NotionClientTests: XCTestCase {
         await sync.sync(id: id, store: store, client: client())
         XCTAssertEqual(appended, 2); XCTAssertEqual(Set(archived), Set((1...4).map { "owned-1-\($0)" }))
         XCTAssertEqual(store.meetings.first?.notionPageID, "existing-page")
+    }
+    @MainActor func testDeletedManagedBlockDoesNotTrapSync() async throws {
+        let defaults = UserDefaults.standard; let previous = defaults.object(forKey: "notionEnabled")
+        defaults.set(true, forKey: "notionEnabled")
+        defer { if let previous { defaults.set(previous, forKey: "notionEnabled") } else { defaults.removeObject(forKey: "notionEnabled") } }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = Store(root: folder); let id = try XCTUnwrap(store.create())
+        store.update(id) { $0.summary = "## Revenue\n- Example"; $0.notionSyncEnabled = true; $0.notionPageID = "page"; $0.notionParentID = "page"; $0.notionParentKind = "existing"; $0.notionBlockIDs = ["deleted"]; $0.notionSyncedAt = Date() }
+        NotionStub.reply = { request in
+            if request.url!.lastPathComponent == "deleted" { return (404, Data("{\"message\":\"Already deleted\"}".utf8)) }
+            return (200, Data("{\"results\":[{\"id\":\"new-1\"},{\"id\":\"new-2\"},{\"id\":\"new-3\"},{\"id\":\"new-4\"}]}".utf8))
+        }
+        await NotionSync().sync(id: id, store: store, client: client())
+        XCTAssertNil(store.meetings.first?.notionError)
+        XCTAssertEqual(store.meetings.first?.notionBlockIDs, ["new-1", "new-2", "new-3", "new-4"])
+    }
+    @MainActor func testRemoteEditsStopReplacementBeforeAnyWrite() async throws {
+        let defaults = UserDefaults.standard; let previous = defaults.object(forKey: "notionEnabled")
+        defaults.set(true, forKey: "notionEnabled")
+        defer { if let previous { defaults.set(previous, forKey: "notionEnabled") } else { defaults.removeObject(forKey: "notionEnabled") } }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = Store(root: folder); let id = try XCTUnwrap(store.create())
+        store.update(id) { $0.summary = "Local revision"; $0.notionSyncEnabled = true; $0.notionPageID = "page"; $0.notionParentID = "page"; $0.notionParentKind = "existing"; $0.notionBlockIDs = ["edited"]; $0.notionSyncedAt = Date(timeIntervalSince1970: 0) }
+        var writes = 0
+        NotionStub.reply = { request in
+            if request.httpMethod != "GET" { writes += 1 }
+            return (200, Data("{\"last_edited_time\":\"2026-10-29T07:00:00.000Z\",\"has_children\":false}".utf8))
+        }
+        await NotionSync().sync(id: id, store: store, client: client())
+        XCTAssertEqual(writes, 0)
+        XCTAssertTrue(store.meetings.first?.notionError?.hasPrefix("Notion edits detected.") == true)
+        XCTAssertEqual(store.meetings.first?.notionBlockIDs, ["edited"])
     }
     func testRejectedNotionKeySurfacesServerMessage() async {
         NotionStub.reply = { _ in (401, Data("{\"message\":\"API token is invalid.\"}".utf8)) }

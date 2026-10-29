@@ -13,11 +13,27 @@ import AppKit
             WorkspaceView()
                 .environmentObject(store).environmentObject(recorder).environmentObject(pipeline).environmentObject(calendar)
                 .frame(minWidth: 850, minHeight: 560)
-                .onAppear { delegate.store = store; delegate.recorder = recorder; delegate.pipeline = pipeline; delegate.floating.configure(store: store, recorder: recorder, pipeline: pipeline) }
+                .task { await AppUpdater.shared.checkIfDue() }
+                .onAppear {
+                    AppUpdater.shared.idle = { !recorder.recording && !pipeline.working && pipeline.draftDecisionID == nil && pipeline.finishID == nil && NotionSync.shared.syncing.isEmpty && !store.busy }
+                    AppUpdater.shared.save = { store.saveNow() }
+                    delegate.store = store; delegate.recorder = recorder; delegate.pipeline = pipeline; delegate.floating.configure(store: store, recorder: recorder, pipeline: pipeline) }
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1080, height: 760)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for updates…") {
+                    Task {
+                        await AppUpdater.shared.check()
+                        let alert = NSAlert(); alert.messageText = "Minutes updates"; alert.informativeText = AppUpdater.shared.message
+                        if AppUpdater.shared.available != nil {
+                            alert.addButton(withTitle: "Install & relaunch"); alert.addButton(withTitle: "Later")
+                            if alert.runModal() == .alertFirstButtonReturn { await AppUpdater.shared.install() }
+                        } else { alert.addButton(withTitle: "OK"); alert.runModal() }
+                    }
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New note") { store.create() }.keyboardShortcut("n")
                 Button("Import notes or backup…") { store.importText() }.keyboardShortcut("o")

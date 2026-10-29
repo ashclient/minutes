@@ -31,6 +31,8 @@ import AppKit
             }
             if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary) }
             Divider()
+            UpdateSettings()
+            Divider()
             Toggle("Include computer audio", isOn: $computerAudio).font(.callout)
             Text("For online calls. Use headphones to avoid recording voices twice.").font(.caption).foregroundStyle(.secondary)
             DisclosureGroup("More", isExpanded: $more) {
