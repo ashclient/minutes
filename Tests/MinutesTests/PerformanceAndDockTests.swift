@@ -43,6 +43,8 @@ final class PerformanceAndDockTests: XCTestCase {
         var merged: [TranscriptLine] = []
         for _ in 0..<10 { merged = TranscriptMerge.replacing(first, file: "system.caf", with: second) }
         print("PERF: ten ordered merges of 20,000 segments: \(Date().timeIntervalSince(start)) seconds")
+        let reversed = TranscriptMerge.replacing([], file: "mic.caf", with: Array(first.reversed()))
+        XCTAssertEqual(reversed.first?.id, first.first?.id)
         XCTAssertEqual(merged.count, 20000); XCTAssertEqual(merged[0].id, first[0].id); XCTAssertEqual(merged[1].id, second[0].id)
         XCTAssertEqual(merged.last?.text, "Answer 9999")
         XCTAssertEqual(merged.map(\.seconds), merged.map(\.seconds).sorted())

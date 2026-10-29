@@ -1,8 +1,13 @@
 import Foundation
 
 enum TranscriptMerge {
+    private static func ordered(_ lines: [TranscriptLine]) -> [TranscriptLine] {
+        zip(lines, lines.dropFirst()).allSatisfy { $0.0.seconds <= $0.1.seconds } ? lines : lines.sorted { $0.seconds < $1.seconds }
+    }
     static func replacing(_ existing: [TranscriptLine], file: String, with incoming: [TranscriptLine]) -> [TranscriptLine] {
-        let others = existing.filter { $0.audioFile != file }
+        let remaining = existing.filter { $0.audioFile != file }
+        let others = ordered(remaining)
+        let incoming = ordered(incoming)
         var result: [TranscriptLine] = []; result.reserveCapacity(others.count + incoming.count)
         var a = 0, b = 0
         while a < others.count && b < incoming.count {

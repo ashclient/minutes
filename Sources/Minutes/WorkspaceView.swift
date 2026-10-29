@@ -65,7 +65,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
         .onChange(of: store.selectedID) { _, _ in showCalendar = false; pane = meeting?.summary.isEmpty == false ? "AI notes" : "Notes"; recordingsOpen = false }
         .onChange(of: meeting?.notes) { _, _ in
             syncDelay?.cancel()
-            guard let note = meeting, note.notionPageID != nil, note.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) else { return }
+            guard let note = meeting, !protected(note.id), note.notionPageID != nil, note.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) else { return }
             syncDelay = Task {
                 do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch { return }
                 await notion.sync(id: note.id, store: store)
@@ -199,7 +199,8 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             }
             if !protected(note.id) { recovery(note) }
             if let error = note.notionError { HStack(alignment: .top) { Text(error).font(.caption).foregroundStyle(.secondary); Spacer(); Button("Retry Notion") { sync(note.id) }.font(.caption) } }
-            if notion.syncing.contains(note.id) { Label("Saving to Notion…", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary) }
+            if note.notionSyncEnabled == false { Text("Notion sync is off for this meeting.").font(.system(size: 10)).foregroundStyle(.tertiary) }
+            else if notion.syncing.contains(note.id) { Label("Saving to Notion…", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary) }
             else if let date = note.notionSyncedAt { Text("Saved to Notion · " + date.formatted(date: .omitted, time: .shortened)).font(.system(size: 10)).foregroundStyle(.tertiary) }
         }.padding(.horizontal, 40).padding(.top, 28).padding(.bottom, 48).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .center)
     }
