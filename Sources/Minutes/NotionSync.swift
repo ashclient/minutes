@@ -111,8 +111,13 @@ struct NotionClient {
             syncing.remove(id)
             if queued.remove(id) != nil { Task { await self.sync(id: id, store: store) } }
         }
+        let deliveryRevision = store.meetings.first { $0.id == id }?.notionDeliveryRevision
+        func currentDelivery() -> Bool {
+            guard let current = store.meetings.first(where: { $0.id == id && !$0.trashed }) else { return false }
+            return current.notionDeliveryRevision == deliveryRevision && current.notionSyncEnabled != false
+        }
         do {
-            guard var meeting = store.meetings.first(where: { $0.id == id && !$0.trashed }), meeting.notionSyncEnabled != false else { return }
+            guard var meeting = store.meetings.first(where: { $0.id == id && !$0.trashed }), currentDelivery() else { return }
             let client: NotionClient
             if let suppliedClient { client = suppliedClient } else { client = NotionClient(token: try CloudKey.read(service: "notion")) }
             let defaults = UserDefaults.standard
@@ -124,6 +129,7 @@ struct NotionClient {
             if meeting.notionPageID == nil {
                 let parent = NotionClient.pageParent(kind: kind, id: parentID)
                 let response = try await client.call("pages", method: "POST", body: ["parent": parent, "properties": properties])
+                guard currentDelivery() else { return }
                 guard let page = response["id"] as? String else { throw AppFailure("Notion did not return a page ID.") }
                 meeting.notionPageID = page
                 store.update(id) { $0.notionPageID = page; $0.notionURL = response["url"] as? String; $0.notionParentKind = kind; $0.notionParentID = parentID }
@@ -131,6 +137,7 @@ struct NotionClient {
             } else if kind != "existing" {
                 _ = try await client.call("pages/" + meeting.notionPageID!, method: "PATCH", body: ["properties": properties])
             }
+            guard currentDelivery() else { return }
             var children = NotionClient.content(meeting, transcript: defaults.bool(forKey: "notionIncludeTranscript"))
             if kind == "existing" { children.insert(NotionClient.block(meeting.title, type: "heading_2"), at: 0) }
             // Write native blocks directly on the page, in bounded batches.
@@ -138,10 +145,12 @@ struct NotionClient {
             let oldIDs = Array(Set((meeting.notionBlockIDs ?? []) + [meeting.notionBlockID].compactMap { $0 }))
             var newIDs: [String] = []
             for start in stride(from: 0, to: children.count, by: 40) {
+                guard currentDelivery() else { return }
                 let batch = Array(children[start..<min(start + 40, children.count)])
                 let body: [String: Any] = ["children": batch]
                 guard try JSONSerialization.data(withJSONObject: body).count < 480000 else { throw AppFailure("A notes section is too large for Notion. Your local notes are saved.") }
                 let appended = try await client.call("blocks/" + meeting.notionPageID! + "/children", method: "PATCH", body: body)
+                guard currentDelivery() else { return }
                 let ids = (appended["results"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
                 guard ids.count == batch.count else { throw AppFailure("Notion did not confirm every notes block. Retry to finish syncing.") }
                 newIDs += ids
@@ -149,13 +158,15 @@ struct NotionClient {
             }
             // Only archive blocks previously written by Minutes. Keep other edits.
             for old in oldIDs {
+                guard currentDelivery() else { return }
                 _ = try await client.call("blocks/" + old, method: "PATCH", body: ["archived": true])
+                guard currentDelivery() else { return }
                 store.update(id) { $0.notionBlockIDs?.removeAll { $0 == old }; if $0.notionBlockID == old { $0.notionBlockID = nil } }; store.saveNow()
             }
             store.update(id) {
                 $0.notionBlockID = nil; $0.notionBlockIDs = newIDs; $0.notionSyncedAt = Date(); $0.notionError = nil
                 $0.notionNeedsSync = $0.notes != meeting.notes || $0.summary != meeting.summary || $0.title != meeting.title || $0.transcript != meeting.transcript || $0.eventStart != meeting.eventStart || $0.eventEnd != meeting.eventEnd
             }; store.saveNow()
-        } catch { store.update(id) { $0.notionError = error.localizedDescription } }
+        } catch { if currentDelivery() { store.update(id) { $0.notionError = error.localizedDescription } } }
     }
 }

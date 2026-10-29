@@ -44,6 +44,7 @@ struct Meeting: Sendable, Identifiable, Codable, Equatable {
     var notionParentID: String? = nil
     var notionNeedsSync: Bool? = nil
     var notionSyncEnabled: Bool? = nil
+    var notionDeliveryRevision: UUID? = nil
     var favorite = false
     var trashed = false
     var transcriptText: String { transcript.map { "[\($0.timestamp)] \($0.source): \($0.text)" }.joined(separator: "\n") }

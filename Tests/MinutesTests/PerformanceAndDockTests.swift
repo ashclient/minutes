@@ -66,7 +66,9 @@ final class PerformanceAndDockTests: XCTestCase {
         let page = NotionPageChoice(id: "existing", title: "Accounting", url: "https://www.notion.so/existing")
         NotionDelivery.apply(mode: .existing, page: page, to: &meeting)
         XCTAssertEqual(meeting.notionPageID, "existing"); XCTAssertEqual(meeting.notionParentKind, "existing"); XCTAssertNil(meeting.notionBlockIDs)
+        let before = meeting.notionDeliveryRevision
         NotionDelivery.apply(mode: .local, page: nil, to: &meeting)
+        XCTAssertNotEqual(meeting.notionDeliveryRevision, before)
         XCTAssertFalse(meeting.shouldSync(automatic: true)); XCTAssertEqual(meeting.notionPageID, "existing")
         NotionDelivery.apply(mode: .newPage, page: nil, to: &meeting)
         XCTAssertNil(meeting.notionPageID); XCTAssertNil(meeting.notionParentKind); XCTAssertTrue(meeting.shouldSync(automatic: false))
