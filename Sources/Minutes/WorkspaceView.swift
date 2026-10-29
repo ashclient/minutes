@@ -2,6 +2,8 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+private struct SettingsRoute: Identifiable { let tab: String; var id: String { tab } }
+
 @MainActor struct WorkspaceView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var recorder: Recorder
@@ -10,8 +12,7 @@ import UniformTypeIdentifiers
     @ObservedObject private var notion = NotionSync.shared
     @AppStorage("includeComputer") private var includeComputer = false
     @State private var sidebar = true
-    @State private var setup = false
-    @State private var settingsTab = "General"
+    @State private var setup: SettingsRoute?
     @State private var detailsID: UUID?
     @State private var editingID: UUID?
     @State private var draft = ""
@@ -37,9 +38,9 @@ import UniformTypeIdentifiers
                 footer
             }.background(Color(nsColor: .textBackgroundColor))
         }.tint(Color.primary)
-        .sheet(isPresented: $setup, onDismiss: {
+        .sheet(item: $setup, onDismiss: {
             if (UserDefaults.standard.bool(forKey: "openRouterEnabled") || (NotesAIProvider.selected == .apple && AppleAIAvailability.current.available)), let meeting, meeting.pipelineStatus == "needsKey", processingAvailable { pipeline.resume(id: meeting.id, store: store, recorder: recorder) }
-        }) { AppSettingsView(initialTab: settingsTab).environmentObject(calendar) }
+        }) { route in AppSettingsView(initialTab: route.tab).environmentObject(calendar) }
         .sheet(isPresented: Binding(get: { detailsID != nil }, set: { if !$0 { detailsID = nil } })) {
             if let id = detailsID { DetailsView(id: id).environmentObject(store).environmentObject(recorder).environmentObject(pipeline) }
         }
@@ -63,8 +64,8 @@ import UniformTypeIdentifiers
             }
         }
         .onAppear {
-            if ProcessInfo.processInfo.arguments.contains("--preview-connections") { settingsTab = "Connections"; setup = true }
-            if ProcessInfo.processInfo.arguments.contains("--preview-settings") { settingsTab = "General"; setup = true }
+            if ProcessInfo.processInfo.arguments.contains("--preview-connections") || ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-google") { openSettings("Connections") }
+            if ProcessInfo.processInfo.arguments.contains("--preview-settings") { openSettings("General") }
             if UserDefaults.standard.bool(forKey: "notionAutoSync") {
                 for note in store.meetings where !note.trashed && note.notionNeedsSync == true && (note.notionPageID != nil || note.calendarEventKey != nil) {
                     Task { await notion.sync(id: note.id, store: store) }
@@ -237,7 +238,7 @@ import UniformTypeIdentifiers
     private func emptyPane(_ title: String, detail: String) -> some View { VStack(alignment: .leading, spacing: 8) { Text(title).font(.system(size: 14)); Text(detail).font(.system(size: 12)).foregroundStyle(.secondary) }.padding(.vertical, 18) }
     private func sectionLabel(_ text: String) -> some View { Text(text).font(.system(size: 11, weight: .medium)).foregroundStyle(.tertiary) }
     private func eventTime(_ date: Date) -> String { Calendar.current.isDateInToday(date) ? "Today · " + date.formatted(date: .omitted, time: .shortened) : date.formatted(.dateTime.weekday(.abbreviated).hour().minute()) }
-    private func openSettings(_ tab: String) { settingsTab = tab; setup = true }
+    private func openSettings(_ tab: String) { setup = SettingsRoute(tab: tab) }
     private func sync(_ id: UUID) { if UserDefaults.standard.bool(forKey: "notionEnabled") { Task { await notion.sync(id: id, store: store) } } else { openSettings("Connections") } }
     private func importAudio() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.audio]

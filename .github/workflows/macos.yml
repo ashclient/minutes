@@ -23,19 +23,17 @@ jobs:
         continue-on-error: true
         run: |
           python3 Checks/preview_fixture.py
-          open dist/Minutes.app --args --preview-connections
-          sleep 3
-          screencapture -x dist/Minutes-preview.png
-          osascript -e 'tell application id "com.minutes.local" to quit'
-          open dist/Minutes.app --args --preview-settings
-          sleep 3
-          screencapture -x dist/Minutes-settings.png
+          for mode in connections settings notion google; do
+            open dist/Minutes.app --args "--preview-$mode"
+            sleep 3
+            screencapture -x "dist/Minutes-$mode.png"
+            pkill -TERM -x Minutes || true
+            sleep 1
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: Minutes-preview
-          path: |
-            dist/Minutes-preview.png
-            dist/Minutes-settings.png
+          path: dist/Minutes-*.png
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:

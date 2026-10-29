@@ -36,7 +36,7 @@ import AppKit
                 Button("Choose another setup file…", action: importClient).font(.caption)
             }
             if !calendar.message.isEmpty { Text(calendar.message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-        }.padding(24).frame(width: 490, height: 450)
+        }.padding(24).frame(width: 490, height: 560)
         .onAppear { if calendar.configured { step = 2 } }
         .onDisappear { if calendar.signingIn { calendar.cancelSignIn() } }
     }

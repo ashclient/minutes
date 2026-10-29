@@ -59,7 +59,7 @@ struct NotionPageChoice: Identifiable, Equatable {
                 HStack { Button("Back") { step = 0 }; Spacer(); Button(working ? "Connecting…" : "Use this page") { Task { await finish() } }.buttonStyle(.borderedProminent).disabled(working) }
             }
             if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-        }.padding(24).frame(width: 490, height: 510)
+        }.padding(24).frame(width: 490, height: 550)
         .onAppear {
             if UserDefaults.standard.bool(forKey: "notionEnabled"), let saved = try? CloudKey.read(service: "notion"), !saved.isEmpty { verifiedKey = saved; step = 1 }
         }
