@@ -37,6 +37,7 @@ import Combine
     private var collapsed = false
     private let dock = RecorderDockState()
     private var restoredFrame: NSRect?
+    private var dockDisplayFrame: NSRect?
     private var moveCheck: Task<Void, Never>?
     func configure(store: Store, recorder: Recorder, pipeline: MeetingPipeline) {
         guard panel == nil else { return }
@@ -48,10 +49,12 @@ import Combine
         panel.isMovableByWindowBackground = true; panel.isReleasedWhenClosed = false
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         let previewCollapsed = ProcessInfo.processInfo.arguments.contains("--preview-recorder-collapsed")
-        panel.contentView = NSHostingView(rootView: FloatingRecorderView(showMain: { [weak self] in self?.showMain() }, resize: { [weak self] collapsed in self?.resize(collapsed) }, dock: dock, restore: { [weak self] in self?.restore() }, initiallyCollapsed: previewCollapsed).environmentObject(store).environmentObject(recorder).environmentObject(pipeline))
+        let hosted = NSHostingView(rootView: FloatingRecorderView(showMain: { [weak self] in self?.showMain() }, resize: { [weak self] collapsed in self?.resize(collapsed) }, dock: dock, restore: { [weak self] in self?.restore() }, initiallyCollapsed: previewCollapsed).environmentObject(store).environmentObject(recorder).environmentObject(pipeline))
+        hosted.sizingOptions = []; panel.contentView = hosted
+        panel.contentMinSize = .zero; panel.contentMaxSize = NSSize(width: 10000, height: 10000)
         if let screen = NSScreen.main { panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 352, y: screen.visibleFrame.minY + 24)) }
         self.panel = panel
-        panel.dragEnded = { [weak self] in self?.dockIfNeeded() }
+        panel.dragEnded = { [weak self] proposed in self?.dockIfNeeded(proposed: proposed) }
         observers.append(NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 self?.moveCheck?.cancel()
@@ -61,8 +64,20 @@ import Combine
                 }
             }
         })
-        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.restore() } })
-        if ProcessInfo.processInfo.arguments.contains("--preview-recorder-docked") { panel.setFrameOrigin(NSPoint(x: NSScreen.main!.frame.maxX - 80, y: panel.frame.minY)); dockIfNeeded(); panel.orderFrontRegardless(); return }
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in
+            guard let self, let oldDisplay = self.dockDisplayFrame, !NSScreen.screens.contains(where: { $0.frame == oldDisplay }) else { return }
+            self.restore()
+        } })
+        if ProcessInfo.processInfo.arguments.contains("--preview-recorder-docked"), let screen = NSScreen.main {
+            let proposed = NSRect(x: screen.frame.maxX - 80, y: panel.frame.minY, width: 280, height: 76)
+            dockIfNeeded(proposed: proposed); panel.orderFrontRegardless()
+            Task {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                let status: [String: Any] = ["docked": self.dock.edge != nil, "width": panel.frame.width, "height": panel.frame.height]
+                if let data = try? JSONSerialization.data(withJSONObject: status) { try? data.write(to: URL(fileURLWithPath: "/tmp/Minutes-dock-check.json")) }
+            }
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("--preview-recorder") || previewCollapsed { resize(previewCollapsed); panel.orderFrontRegardless(); return }
         recorder.$recording.receive(on: RunLoop.main).sink { [weak self] _ in self?.update() }.store(in: &subscriptions)
         pipeline.$finishID.compactMap { $0 }.receive(on: RunLoop.main).sink { [weak self] _ in self?.showMain() }.store(in: &subscriptions)
@@ -81,12 +96,13 @@ import Combine
         }
         panel.setFrame(frame, display: true, animate: false)
     }
-    private func dockIfNeeded() {
+    private func dockIfNeeded(proposed: NSRect? = nil) {
         guard let panel, dock.edge == nil else { return }
+        let frame = proposed ?? panel.frame
         let frames = NSScreen.screens.map(\.frame)
-        guard let edge = RecorderDockGeometry.edge(for: panel.frame, screens: frames), let target = RecorderDockGeometry.screen(for: panel.frame, screens: frames), let screen = NSScreen.screens.first(where: { $0.frame == target }) else { return }
-        restoredFrame = panel.frame; dock.edge = edge
-        panel.setFrame(RecorderDockGeometry.dockFrame(edge: edge, previous: panel.frame, visible: screen.visibleFrame), display: true)
+        guard let edge = RecorderDockGeometry.edge(for: frame, screens: frames), let target = RecorderDockGeometry.screen(for: frame, screens: frames), let screen = NSScreen.screens.first(where: { $0.frame == target }) else { return }
+        restoredFrame = frame; dockDisplayFrame = screen.frame; dock.edge = edge
+        panel.setFrame(RecorderDockGeometry.dockFrame(edge: edge, previous: frame, visible: screen.visibleFrame), display: true)
     }
     private func restore() {
         guard let panel else { return }
@@ -97,7 +113,7 @@ import Combine
         if let visible = screen?.visibleFrame {
             panel.setFrame(RecorderDockGeometry.restored(NSRect(origin: old.origin, size: size), visible: visible), display: true)
         }
-        restoredFrame = nil; dock.edge = nil
+        restoredFrame = nil; dockDisplayFrame = nil; dock.edge = nil
     }
     private func update() {
         let main = NSApp.windows.first { $0.identifier?.rawValue == "main" || ($0.title == "Minutes" && !($0 is NSPanel)) }
@@ -111,7 +127,7 @@ import Combine
     }
 }
 private final class RecordingPanel: NSPanel {
-    var dragEnded: (() -> Void)?
+    var dragEnded: ((NSRect) -> Void)?
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -136,7 +152,21 @@ private struct RecorderDragHandle: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { DragView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
     private final class DragView: NSView {
-        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event); (window as? RecordingPanel)?.dragEnded?() }
+        override func mouseDown(with event: NSEvent) {
+            guard let window else { return }
+            let initial = window.frame, start = NSEvent.mouseLocation
+            var proposed = initial
+            while true {
+                guard let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: Date(timeIntervalSinceNow: 0.1), inMode: .eventTracking, dequeue: true) else {
+                    if NSEvent.pressedMouseButtons == 0 { break }; continue
+                }
+                let point = NSEvent.mouseLocation
+                proposed.origin = NSPoint(x: initial.minX + point.x - start.x, y: initial.minY + point.y - start.y)
+                window.setFrameOrigin(proposed.origin)
+                if next.type == .leftMouseUp { break }
+            }
+            (window as? RecordingPanel)?.dragEnded?(proposed)
+        }
         override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
         override func draw(_ dirtyRect: NSRect) {
             NSColor.secondaryLabelColor.withAlphaComponent(0.45).setFill()

@@ -28,6 +28,7 @@ jobs:
             open dist/Minutes.app --args "--preview-$mode"
             sleep 3
             screencapture -x "dist/Minutes-$mode.png"
+            if [ "$mode" = recorder-docked ]; then python3 -c 'import json; d=json.load(open("/tmp/Minutes-dock-check.json")); assert d["docked"] and d["width"] == 24 and d["height"] == 44, d'; fi
             pkill -TERM -x Minutes || true
             sleep 1
           done
