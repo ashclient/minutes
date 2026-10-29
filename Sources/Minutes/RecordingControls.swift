@@ -20,11 +20,11 @@ import Combine
             Button { pipeline.stop(store: store, recorder: recorder) } label: {
                 HStack(spacing: 6) { Image(systemName: "stop.fill"); if !compact { Text("Finish meeting") } }.font(.system(size: 11, weight: .medium)).padding(.horizontal, compact ? 0 : 12).frame(minWidth: compact ? 26 : 30, minHeight: compact ? 26 : 30).foregroundStyle(.white).background(Color.red.opacity(0.85), in: Capsule())
             }
-                .buttonStyle(.plain).help("Stop & make notes").accessibilityLabel("Stop & make notes")
+                .buttonStyle(SurfaceButtonStyle(radius: 99)).help("Stop & make notes").accessibilityLabel("Stop & make notes")
         }.disabled(pipeline.working)
     }
     private func control(_ icon: String, _ help: String, active: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { HStack(spacing: 6) { Image(systemName: icon); if !compact { Text(icon.contains("mic") ? (active ? "Unmute" : "Mute") : (active ? "Resume" : "Pause")) } }.font(.system(size: 12)).padding(.horizontal, compact ? 0 : 10).frame(minWidth: compact ? 26 : 30, minHeight: compact ? 26 : 30).foregroundStyle(active ? Color.orange : Color.primary).background(active ? Color.orange.opacity(0.12) : Color.primary.opacity(0.04), in: Capsule()) }.buttonStyle(.plain).help(help).accessibilityLabel(help)
+        Button(action: action) { HStack(spacing: 6) { Image(systemName: icon); if !compact { Text(icon.contains("mic") ? (active ? "Unmute" : "Mute") : (active ? "Resume" : "Pause")) } }.font(.system(size: 12)).padding(.horizontal, compact ? 0 : 10).frame(minWidth: compact ? 26 : 30, minHeight: compact ? 26 : 30).foregroundStyle(active ? Color.orange : Color.primary).background(active ? Color.orange.opacity(0.12) : Color.primary.opacity(0.04), in: Capsule()) }.buttonStyle(SurfaceButtonStyle(radius: 99)).help(help).accessibilityLabel(help)
     }
 }
 
@@ -190,7 +190,7 @@ private struct RecorderDragHandle: NSViewRepresentable {
             Button(action: restore) {
                 VStack(spacing: 3) { Image(systemName: edge.icon).font(.system(size: 11, weight: .semibold)); Circle().fill(recorder.paused ? Color.orange : Color.red).frame(width: 3, height: 3) }
                     .frame(width: edge.vertical ? 24 : 44, height: edge.vertical ? 44 : 24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-            }.buttonStyle(.plain).help("Show recording controls").accessibilityLabel("Show recording controls")
+            }.buttonStyle(SurfaceButtonStyle(radius: 8)).help("Show recording controls").accessibilityLabel("Show recording controls")
         } else {
         VStack(spacing: 5) {
             if !collapsed {
@@ -201,7 +201,7 @@ private struct RecorderDragHandle: NSViewRepresentable {
                     Spacer(minLength: 0)
                     Button(action: showMain) { Image(systemName: "arrow.up.right") }.help("Open meeting in Minutes")
                     collapseButton
-                }.buttonStyle(.plain).font(.system(size: 10))
+                }.buttonStyle(SurfaceButtonStyle()).font(.system(size: 10))
             }
             HStack(spacing: 5) {
                 if collapsed { RecorderDragHandle().frame(width: 12, height: 24).help("Drag to move recorder"); RecorderWaveform(meters: recorder.meters, muted: recorder.microphoneMuted, paused: recorder.paused).frame(width: 24).clipped() }
@@ -213,6 +213,6 @@ private struct RecorderDragHandle: NSViewRepresentable {
     }
     }
     private var collapseButton: some View {
-        Button { collapsed.toggle(); resize(collapsed) } label: { Image(systemName: collapsed ? "chevron.up" : "chevron.down").font(.system(size: 10)).frame(width: 18, height: 22) }.buttonStyle(.plain).help(collapsed ? "Expand recorder" : "Collapse recorder").accessibilityLabel(collapsed ? "Expand recorder" : "Collapse recorder")
+        Button { collapsed.toggle(); resize(collapsed) } label: { Image(systemName: collapsed ? "chevron.up" : "chevron.down").font(.system(size: 10)).frame(width: 18, height: 22) }.buttonStyle(SurfaceButtonStyle()).help(collapsed ? "Expand recorder" : "Collapse recorder").accessibilityLabel(collapsed ? "Expand recorder" : "Collapse recorder")
     }
 }

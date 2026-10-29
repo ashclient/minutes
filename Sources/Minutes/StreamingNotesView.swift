@@ -32,7 +32,6 @@ struct StreamingNotesView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             NoteDocument(text: reveal.visible).equatable()
-            if running { RoundedRectangle(cornerRadius: 1).fill(Color.secondary).frame(width: 2, height: 13).accessibilityHidden(true) }
         }
         .onAppear { reveal.update(text, immediate: reduceMotion || !running) }
         .onChange(of: text) { _, value in reveal.update(value, immediate: reduceMotion || !running) }

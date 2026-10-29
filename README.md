@@ -1,4 +1,4 @@
-# Minutes 2.5
+# Minutes 2.5.1
 
 Native macOS meeting and lecture notes with Apple transcription, optional Apple Intelligence or OpenRouter, Google Calendar and Notion. Runs on macOS 14+; modern Apple speech needs macOS 26 on eligible hardware. Experimental Apple Intelligence generation currently requires macOS 27 and a ready system model.
 
@@ -14,7 +14,7 @@ Every successful main-branch build publishes a release when the app version is n
 
 Choose a Google event or create a note, type your own notes, then record microphone or microphone plus computer audio. Approve macOS screen/system-audio capture for computer audio. No screen video is written. Use headphones to avoid capturing speakers twice through the microphone. The app remains usable while recording, and the draggable floating controls can collapse or dock at screen edges. Recordings and the transcript share an expandable source card.
 
-Finish offers **Auto**, **Brief**, **Detailed**, or **Full detail**, plus **Outline**, **Cornell**, or **Q&A** formatting. Auto reads the source first and reviews the collected topics without a fixed word target. Brief is capped at 300 words for the whole lecture; Detailed at 900. Full detail retains broader explanations and examples. Outline follows personal college notes: topic/subtopic headings, short bullets, nested details, numbered examples and standalone formulas. Apple inference is sequential to limit device pressure. Text streams as a live draft, with a smooth presentation respecting Reduce Motion. Cancelling a draft offers keep-partial or revert; previous saved notes stay intact until successful replacement or an explicit keep choice.
+Finish offers **Auto**, **Brief**, **Detailed**, or **Full detail**, plus **Outline**, **Cornell**, or **Q&A** formatting. Auto reads the source, consolidates its main concepts across the whole lecture, then writes concise, selective notes without a fixed word target. Brief is capped at 300 words for the whole lecture; Detailed at 900. Full detail retains broader explanations and examples. Outline follows personal college notes: topic/subtopic headings, short bullets, nested details, numbered examples and standalone formulas. Apple inference is sequential to limit device pressure. Text streams as a live draft, with a smooth presentation respecting Reduce Motion. Cancelling a draft offers keep-partial or revert; previous saved notes stay intact until successful replacement or an explicit keep choice.
 
 Apple's system model has a small context window, so long lectures require multiple requests. Generation can omit or misinterpret information, including numbers; the full transcript and audio remain available. No measured tokens-per-second rate is promised. Minutes never silently switches Apple generation to cloud AI. OpenRouter uses `openrouter/free` with its account/provider limits; only text is sent, not recordings.
 

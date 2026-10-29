@@ -74,7 +74,7 @@ struct CalendarTimeline: View {
                             Text(item.event.start.formatted(date: .omitted, time: .shortened)).font(.system(size: 9)).foregroundStyle(.secondary)
                             Spacer(minLength: 0)
                         }.padding(5).frame(width: width, height: max(24, CGFloat(end - start) / 60 * hour - 2), alignment: .topLeading).background(item.event.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 5)).overlay(alignment: .leading) { RoundedRectangle(cornerRadius: 1).fill(item.event.color).frame(width: 2) }.clipped()
-                    }.buttonStyle(.plain).help(item.event.title + " · " + item.event.calendar).offset(x: CGFloat(item.lane) * geometry.size.width / CGFloat(item.lanes) + 2, y: CGFloat(start) / 60 * hour)
+                    }.buttonStyle(SurfaceButtonStyle(radius: 5)).help(item.event.title + " · " + item.event.calendar).offset(x: CGFloat(item.lane) * geometry.size.width / CGFloat(item.lanes) + 2, y: CGFloat(start) / 60 * hour)
                 }
                 if Calendar.current.isDateInToday(day) {
                     TimelineView(.periodic(from: .now, by: 60)) { context in

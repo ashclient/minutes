@@ -60,26 +60,14 @@ enum AppleTextBudget {
         var notes: [String] = []
         for (index, text) in parts.enumerated() {
             try Task.checkCancellation()
-            let purpose = length == .auto ? "Review this source and extract the distinct concepts, essential reasoning and supported examples needed for study. Merge repetition. No length target. Preserve quantity labels exactly. Do not invent missing definitions, examples or assignments." : "Extract only source-supported concepts in at most \(StudyBudget.evidenceWords(length)) words. Do not create coursework, numeric examples or definitions absent from this source. Omit unclear or incomplete examples rather than filling gaps."
-            let output = try await generate(text, instruction: purpose + " " + format.instruction, tokens: length == .auto ? 1000 : length == .brief ? 130 : length == .detailed ? 250 : 550, key: length.rawValue + format.rawValue, partial: { value in
+            let purpose = length == .auto ? "Extract a compact inventory of the MAIN concepts, essential rules, formulas and necessary conditions. Merge repetition; omit incidental details, repeated examples and incomplete fragments. Use factual phrases rather than expanded teaching prose. No length target. Preserve quantity labels exactly. Do not invent missing definitions, examples or assignments." : "Extract only source-supported concepts in at most \(StudyBudget.evidenceWords(length)) words. Do not create coursework, numeric examples or definitions absent from this source. Omit unclear or incomplete examples rather than filling gaps."
+            let output = try await generate(text, instruction: purpose + " " + format.instruction, tokens: length == .auto ? 450 : length == .brief ? 130 : length == .detailed ? 250 : 550, key: length.rawValue + format.rawValue, partial: { value in
                 if length == .complete { partial(LectureNotes.organize(notes + [value])) }
             })
             notes.append(output)
             fraction(Double(index + 1) / Double(parts.count) * (length == .complete ? 1 : 0.65))
         }
         if length == .complete { return SummaryResult(summary: LectureNotes.organize(notes), decisions: [], actions: []) }
-        if length == .auto {
-            progress("Reviewing topics and choosing useful detail…")
-            let evidence = LectureNotes.organize(notes)
-            let groups = AppleTextBudget.chunks(evidence, bytes: 2400)
-            var reviewed: [String] = []
-            for (index, group) in groups.enumerated() {
-                let output = try await generate(group, instruction: length.instruction + " " + format.instruction + " These are reviewed source extracts from the whole lecture. Consolidate the topics here. Keep only supported content; correct no facts from outside knowledge. Close every formula delimiter before starting prose.", tokens: 1600, key: "auto-review-" + format.rawValue, partial: { value in partial(LectureNotes.organize(reviewed + [value])) })
-                reviewed.append(output)
-                fraction(0.65 + 0.35 * Double(index + 1) / Double(groups.count))
-            }
-            return SummaryResult(summary: LectureNotes.organize(reviewed), decisions: [], actions: [])
-        }
         // The final request represents the entire lecture, not one source chunk.
         // Reduce evidence recursively within Apple's small session context.
         var evidence = notes.joined(separator: "\n")
@@ -89,7 +77,7 @@ enum AppleTextBudget {
             if groups.count <= 1 { break }
             var condensed: [String] = []
             for group in groups {
-                condensed.append(try await generate(group, instruction: "Consolidate these source extracts into at most 60 words of key concepts. Merge repeats. Retain the essential rules. Do not add examples, facts or assignments.", tokens: 150, key: "reduce", partial: { _ in }))
+                condensed.append(try await generate(group, instruction: length == .auto ? "Consolidate these extracts into a compact factual concept inventory for the entire lecture. Merge synonymous topics and repeated explanations. Keep essential rules, conditions and formulas; include an example only when it teaches a different rule. Use compressed factual phrases, not finished prose or a section-by-section recap. Do not invent content. The next pass will write the notes." : "Consolidate these source extracts into at most 60 words of key concepts. Merge repeats. Retain the essential rules. Do not add examples, facts or assignments.", tokens: length == .auto ? 280 : 150, key: "reduce-" + length.rawValue, partial: { _ in }))
             }
             let next = condensed.joined(separator: "\n")
             guard next.utf8.count < evidence.utf8.count else { throw AppFailure("Apple could not condense this lecture safely. Retry; your previous notes are kept.") }
@@ -103,7 +91,7 @@ enum AppleTextBudget {
     }
     @available(macOS 26.0, *)
     private static func generate(_ text: String, instruction: String, tokens: Int, key cacheTag: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
-        let key = "lecture-v4:" + cacheTag + instruction + "\n" + text
+        let key = "lecture-v5:" + cacheTag + instruction + "\n" + text
         if let saved = completedSections[key] { partial(saved); return saved }
         // Plain-text streaming avoids schema parsing failures and their full retries.
         let attempt = await AsyncDeadline.run(seconds: 120) {

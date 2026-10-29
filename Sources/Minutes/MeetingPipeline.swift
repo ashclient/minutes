@@ -36,8 +36,9 @@ import AVFoundation
         }
     }
     func showProgressPreview(id: UUID) {
-        guard ProcessInfo.processInfo.arguments.contains("--preview-progress") else { return }
+        guard ProcessInfo.processInfo.arguments.contains(where: { $0 == "--preview-progress" || $0 == "--preview-progress-background" }) else { return }
         activeID = id; stage = "generating"; message = "Writing your notes…"; progressFraction = 0.62
+        liveDraft = "## Main concepts\n- **Recognition:** record the transaction when the stated conditions are met.\n- Combine related explanations into one useful topic.\n\n## Allocation\n- Divide the transaction price using relative standalone prices.\n- Keep formulas and essential conditions together."
         work = Task { try? await Task.sleep(nanoseconds: 20_000_000_000) }
     }
     func start(store: Store, recorder: Recorder) {

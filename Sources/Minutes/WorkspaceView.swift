@@ -82,7 +82,10 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             }
         }
         .onAppear {
-            if ProcessInfo.processInfo.arguments.contains("--preview-progress"), let id = store.selectedID { pipeline.showProgressPreview(id: id) }
+            if ProcessInfo.processInfo.arguments.contains(where: { $0 == "--preview-progress" || $0 == "--preview-progress-background" }), let id = store.selectedID {
+                pipeline.showProgressPreview(id: id)
+                if ProcessInfo.processInfo.arguments.contains("--preview-progress-background"), let other = store.meetings.first(where: { $0.id != id }) { store.selectedID = other.id }
+            }
             if ProcessInfo.processInfo.arguments.contains("--preview-calendar") { showCalendar = true }
             if ProcessInfo.processInfo.arguments.contains("--preview-finish") || ProcessInfo.processInfo.arguments.contains("--preview-delivery"), let id = store.selectedID { pipeline.finishID = id }
             if ProcessInfo.processInfo.arguments.contains("--preview-connections") || (ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-notion-destination")) || ProcessInfo.processInfo.arguments.contains("--preview-google") { openSettings("Connections") }
@@ -125,7 +128,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
     }
     private var activityStatus: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if pipeline.working, let id = pipeline.activeID {
+            if pipeline.working, let id = pipeline.activeID, showCalendar || id != store.selectedID {
                 Button { store.selectedID = id; showCalendar = false } label: {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack { ActivityPulse(); Text("Working in background").font(.system(size: 11, weight: .medium)); Spacer(); Image(systemName: "arrow.up.right").font(.system(size: 9)) }

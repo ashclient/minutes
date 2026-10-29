@@ -97,7 +97,7 @@ struct AIClient: Sendable {
         }
         let combined = NotesLength.combine(reviewed)
         guard length != .complete else { return combined }
-        let final = try await generate(system: system + "\nConsolidate these extracts for the ENTIRE lecture. Apply the total word limit. Merge related topics; remove duplication. No invented assignments or examples.", text: combined.summary)
+        let final = try await generate(system: system + "\nConsolidate these extracts for the ENTIRE lecture. The selected length instruction takes priority over the detail retained in the extracts. Apply its whole-document requirements; Auto should be concise and selective. Merge synonymous topics and remove duplication across sections. No invented assignments or examples.", text: combined.summary)
         return SummaryResult(title: combined.title, summary: StudyBudget.limit(final.summary, words: StudyBudget.maximum(length)), decisions: final.decisions, actions: final.actions)
     }
 }
