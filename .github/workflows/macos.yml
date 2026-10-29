@@ -23,7 +23,7 @@ jobs:
         continue-on-error: true
         run: |
           python3 Checks/preview_fixture.py
-          for mode in connections settings notion google; do
+          for mode in connections settings notion google calendar finish; do
             open dist/Minutes.app --args "--preview-$mode"
             sleep 3
             screencapture -x "dist/Minutes-$mode.png"

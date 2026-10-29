@@ -58,13 +58,11 @@ struct NotionClient {
         if !meeting.summary.isEmpty { text += "## Meeting notes\n" + meeting.finishedNotes }
         if transcript && !meeting.transcript.isEmpty { text += "\n\n## Transcript\n" + meeting.transcriptText }
         if text.isEmpty { text = "Ready for this meeting. Notes will appear here after recording." }
-        var blocks = text.components(separatedBy: "\n").filter { !$0.isEmpty }.map { line -> [String: Any] in
-            if line.hasPrefix("#") { return block(String(line.drop(while: { $0 == "#" || $0 == " " })), type: "heading_2") }
-            if line.hasPrefix("- ") || line.hasPrefix("* ") { return block(String(line.dropFirst(2)), type: "bulleted_list_item") }
-            return block(line)
-        }
-        if blocks.count > 95 { blocks = AIClient.chunks(text, limit: 12000).map { block($0) } }
-        return blocks
+        return NotionMarkdown.blocks(text)
+    }
+    static func pageParent(kind: String, id: String) -> [String: Any] {
+        if kind == "workspace" { return ["workspace": true] }
+        return kind == "page" ? ["type": "page_id", "page_id": id] : ["type": "data_source_id", "data_source_id": id]
     }
     func createDatabase(parent: String) async throws -> (source: String, url: String) {
         let result = try await call("databases", method: "POST", body: ["parent": ["type": "page_id", "page_id": parent], "title": Self.rich("Minutes"), "initial_data_source": ["properties": ["Name": ["title": [:]], "Date": ["date": [:]]]]])
@@ -86,11 +84,16 @@ struct NotionClient {
         if let end = meeting.eventEnd { time["end"] = formatter.string(from: end) }
         return [title: ["title": pageTitle(meeting)], date: ["date": time]]
     }
+    static func dateMention(_ date: Date, allDay: Bool) -> String {
+        guard allDay else { return ISO8601DateFormatter().string(from: date) }
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.calendar = Calendar(identifier: .gregorian); formatter.dateFormat = "yyyy-MM-dd"; formatter.timeZone = .current
+        return formatter.string(from: date)
+    }
     static func pageTitle(_ meeting: Meeting) -> [[String: Any]] {
         var value = rich(String(meeting.title.prefix(200)))
         if let start = meeting.eventStart {
             value += rich(" ")
-            value.append(["type": "mention", "mention": ["type": "date", "date": ["start": ISO8601DateFormatter().string(from: start)]]])
+            value.append(["type": "mention", "mention": ["type": "date", "date": ["start": dateMention(start, allDay: meeting.eventAllDay == true)]]])
         }
         return value
     }
@@ -112,32 +115,45 @@ struct NotionClient {
             guard var meeting = store.meetings.first(where: { $0.id == id && !$0.trashed }) else { return }
             let client = NotionClient(token: try CloudKey.read(service: "notion"))
             let defaults = UserDefaults.standard
-            let pageParent = meeting.notionParentKind.map { $0 == "page" } ?? (meeting.notionPageID == nil && defaults.string(forKey: "notionDestinationKind") == "page")
+            let kind = meeting.notionParentKind ?? (meeting.notionPageID == nil ? defaults.string(forKey: "notionDestinationKind") ?? "page" : "database")
+            let pageParent = kind != "database"
             let parentID = meeting.notionParentID ?? defaults.string(forKey: pageParent ? "notionParentPage" : "notionSource") ?? ""
-            guard !parentID.isEmpty else { throw AppFailure("Choose where meeting pages go in Connections.") }
+            guard kind == "workspace" || !parentID.isEmpty else { throw AppFailure("Choose where meeting pages go in Connections.") }
             let properties: [String: Any] = pageParent ? ["title": ["title": NotionClient.pageTitle(meeting)]] : NotionClient.properties(meeting, title: defaults.string(forKey: "notionTitleProperty") ?? "Name", date: defaults.string(forKey: "notionDateProperty") ?? "Date")
             if meeting.notionPageID == nil {
-                let parent = pageParent ? ["type": "page_id", "page_id": parentID] : ["type": "data_source_id", "data_source_id": parentID]
+                let parent = NotionClient.pageParent(kind: kind, id: parentID)
                 let response = try await client.call("pages", method: "POST", body: ["parent": parent, "properties": properties])
                 guard let page = response["id"] as? String else { throw AppFailure("Notion did not return a page ID.") }
                 meeting.notionPageID = page
-                store.update(id) { $0.notionPageID = page; $0.notionURL = response["url"] as? String; $0.notionParentKind = pageParent ? "page" : "database"; $0.notionParentID = parentID }
+                store.update(id) { $0.notionPageID = page; $0.notionURL = response["url"] as? String; $0.notionParentKind = kind; $0.notionParentID = parentID }
                 store.saveNow() // Retain the page ID even if content upload is interrupted.
             } else {
                 _ = try await client.call("pages/" + meeting.notionPageID!, method: "PATCH", body: ["properties": properties])
             }
             let children = NotionClient.content(meeting, transcript: defaults.bool(forKey: "notionIncludeTranscript"))
-            let section: [String: Any] = ["object": "block", "type": "quote", "quote": ["rich_text": NotionClient.rich("Meeting notes · synced from Minutes"), "children": children]]
-            let body: [String: Any] = ["children": [section]]
-            guard children.count <= 100, try JSONSerialization.data(withJSONObject: body).count < 480000 else { throw AppFailure("This note is too large for a single Notion sync. Turn off Include transcript, or export it as Markdown.") }
-            let appended = try await client.call("blocks/" + meeting.notionPageID! + "/children", method: "PATCH", body: body)
-            guard let result = (appended["results"] as? [[String: Any]])?.first, let block = result["id"] as? String else { throw AppFailure("Notion did not confirm the notes section.") }
-            let old = meeting.notionBlockID
+            // Write native blocks directly on the page, in bounded batches.
+            // Track owned IDs after each response so retries can clean up partial uploads.
+            let oldIDs = Array(Set((meeting.notionBlockIDs ?? []) + [meeting.notionBlockID].compactMap { $0 }))
+            var newIDs: [String] = []
+            for start in stride(from: 0, to: children.count, by: 40) {
+                let batch = Array(children[start..<min(start + 40, children.count)])
+                let body: [String: Any] = ["children": batch]
+                guard try JSONSerialization.data(withJSONObject: body).count < 480000 else { throw AppFailure("A notes section is too large for Notion. Your local notes are saved.") }
+                let appended = try await client.call("blocks/" + meeting.notionPageID! + "/children", method: "PATCH", body: body)
+                let ids = (appended["results"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+                guard ids.count == batch.count else { throw AppFailure("Notion did not confirm every notes block. Retry to finish syncing.") }
+                newIDs += ids
+                store.update(id) { $0.notionBlockIDs = oldIDs + newIDs }; store.saveNow()
+            }
+            // Only archive blocks previously written by Minutes. Keep other edits.
+            for old in oldIDs {
+                _ = try await client.call("blocks/" + old, method: "PATCH", body: ["archived": true])
+                store.update(id) { $0.notionBlockIDs?.removeAll { $0 == old }; if $0.notionBlockID == old { $0.notionBlockID = nil } }; store.saveNow()
+            }
             store.update(id) {
-                $0.notionBlockID = block; $0.notionSyncedAt = Date(); $0.notionError = nil
+                $0.notionBlockID = nil; $0.notionBlockIDs = newIDs; $0.notionSyncedAt = Date(); $0.notionError = nil
                 $0.notionNeedsSync = $0.notes != meeting.notes || $0.summary != meeting.summary || $0.title != meeting.title || $0.transcript != meeting.transcript || $0.eventStart != meeting.eventStart || $0.eventEnd != meeting.eventEnd
             }; store.saveNow()
-            if let old { _ = try await client.call("blocks/" + old, method: "PATCH", body: ["archived": true]) }
         } catch { store.update(id) { $0.notionError = error.localizedDescription } }
     }
 }

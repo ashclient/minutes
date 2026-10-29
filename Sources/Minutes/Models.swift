@@ -32,9 +32,12 @@ struct Meeting: Identifiable, Codable, Equatable {
     var eventStart: Date? = nil
     var eventEnd: Date? = nil
     var eventCalendar: String? = nil
+    var eventAllDay: Bool? = nil
     var notionPageID: String? = nil
     var notionURL: String? = nil
     var notionBlockID: String? = nil
+    var notionBlockIDs: [String]? = nil
+    var notesLength: NotesLength? = nil
     var notionSyncedAt: Date? = nil
     var notionError: String? = nil
     var notionParentKind: String? = nil

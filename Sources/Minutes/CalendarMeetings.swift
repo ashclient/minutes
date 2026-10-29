@@ -8,6 +8,7 @@ struct CalendarMeeting: Identifiable {
     let calendar: String
     let color: Color
     let eventURL: URL?
+    var allDay = false
 }
 enum GoogleCalendarEvent {
     static func date(_ value: [String: Any]) -> Date? {
@@ -27,7 +28,7 @@ enum GoogleCalendarEvent {
               let start = date(begin), let end = date(finish) else { return nil }
         if let attendees = json["attendees"] as? [[String: Any]], attendees.contains(where: { $0["self"] as? Bool == true && $0["responseStatus"] as? String == "declined" }) { return nil }
         let title = json["summary"] as? String ?? "Untitled event"
-        return CalendarMeeting(id: "google:" + calendarID + ":" + id, title: title.isEmpty ? "Untitled event" : title, start: start, end: end, calendar: name, color: .blue, eventURL: (json["htmlLink"] as? String).flatMap(URL.init(string:)))
+        return CalendarMeeting(id: "google:" + calendarID + ":" + id, title: title.isEmpty ? "Untitled event" : title, start: start, end: end, calendar: name, color: .blue, eventURL: (json["htmlLink"] as? String).flatMap(URL.init(string:)), allDay: begin["date"] != nil)
     }
 }
 @MainActor final class CalendarMeetings: ObservableObject {
@@ -38,6 +39,10 @@ enum GoogleCalendarEvent {
     @Published private(set) var signingIn = false
     @Published private(set) var refreshing = false
     @Published var message = "Connect Google Calendar to see upcoming meetings."
+    @Published private(set) var monthEvents: [CalendarMeeting] = []
+    @Published private(set) var monthLoading = false
+    @Published private(set) var monthMessage = ""
+    private var monthTask: Task<Void, Never>?
     private let account = GoogleCalendarAccount()
     private var timer: Timer?
     private var refreshTask: Task<Void, Never>?
@@ -55,7 +60,7 @@ enum GoogleCalendarEvent {
     }
     func cancelSignIn() { account.cancelSignIn() }
     func disconnect() {
-        do { try account.disconnect(); refreshTask?.cancel(); refreshTask = nil; authorized = false; events = []; calendars = []; message = "Google Calendar disconnected." }
+        do { try account.disconnect(); refreshTask?.cancel(); refreshTask = nil; authorized = false; events = []; calendars = []; monthTask?.cancel(); monthEvents = []; message = "Google Calendar disconnected." }
         catch { message = error.localizedDescription }
     }
     func refresh() {
@@ -84,16 +89,42 @@ enum GoogleCalendarEvent {
             catch { message = error.localizedDescription }
         }
     }
+    func loadMonth(_ date: Date) {
+        monthTask?.cancel(); monthEvents = []; monthMessage = ""
+        guard authorized else { monthMessage = "Connect Google Calendar in Connections to see your events."; return }
+        let range = CalendarLayout.gridDates(for: date)
+        guard let first = range.first, let last = range.last, let end = Calendar.current.date(byAdding: .day, value: 1, to: last) else { return }
+        monthTask = Task {
+            monthLoading = true; defer { if !Task.isCancelled { monthLoading = false } }
+            do {
+                let found = try await account.list("users/me/calendarList")
+                let hidden = Set(UserDefaults.standard.stringArray(forKey: "hiddenGoogleCalendars") ?? [])
+                var collected: [CalendarMeeting] = []
+                let formatter = ISO8601DateFormatter()
+                for item in found {
+                    guard let id = item["id"] as? String, !hidden.contains(id) else { continue }
+                    try Task.checkCancellation()
+                    let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?%#"))
+                    let path = "calendars/" + (id.addingPercentEncoding(withAllowedCharacters: allowed) ?? "") + "/events"
+                    let rows = try await account.list(path, query: [URLQueryItem(name: "singleEvents", value: "true"), URLQueryItem(name: "orderBy", value: "startTime"), URLQueryItem(name: "timeMin", value: formatter.string(from: first)), URLQueryItem(name: "timeMax", value: formatter.string(from: end)), URLQueryItem(name: "maxResults", value: "250")])
+                    collected += rows.compactMap { GoogleCalendarEvent.meeting($0, calendarID: id, name: item["summary"] as? String ?? id) }
+                }
+                try Task.checkCancellation()
+                monthEvents = collected.sorted { $0.start < $1.start }
+                monthMessage = monthEvents.isEmpty ? "No events in this month. Check your selected calendars in Connections." : ""
+            } catch is CancellationError { } catch { monthMessage = error.localizedDescription }
+        }
+    }
     nonisolated static func key(identifier: String, calendar: String, start: Date) -> String { calendar + ":" + identifier + ":" + String(Int(start.timeIntervalSince1970)) }
 }
 extension Store {
     @discardableResult func open(_ event: CalendarMeeting) -> UUID? {
         if let existing = meetings.first(where: { $0.calendarEventKey == event.id }) {
-            update(existing.id) { $0.trashed = false; $0.eventStart = event.start; $0.eventEnd = event.end }
+            update(existing.id) { $0.trashed = false; $0.eventStart = event.start; $0.eventEnd = event.end; $0.eventAllDay = event.allDay }
             selectedID = existing.id; filter = "All meetings"; query = ""; return existing.id
         }
         guard let id = create() else { return nil }
-        update(id) { $0.title = event.title; $0.calendarEventKey = event.id; $0.eventStart = event.start; $0.eventEnd = event.end; $0.eventCalendar = event.calendar }
+        update(id) { $0.title = event.title; $0.calendarEventKey = event.id; $0.eventStart = event.start; $0.eventEnd = event.end; $0.eventCalendar = event.calendar; $0.eventAllDay = event.allDay }
         return id
     }
 }

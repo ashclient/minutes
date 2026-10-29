@@ -16,6 +16,8 @@ struct NotionPageChoice: Identifiable, Equatable {
 @MainActor struct NotionSetup: View {
     @Environment(\.dismiss) private var dismiss
     @State private var step = 0
+    @State private var destination = "workspace"
+    @State private var canCreatePrivate = false
     @State private var token = ""
     @State private var verifiedKey = ""
     @State private var query = ""
@@ -27,7 +29,7 @@ struct NotionPageChoice: Identifiable, Equatable {
     @State private var message = ""
     @State private var cursor: String?
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        ScrollView { VStack(alignment: .leading, spacing: 16) {
             HStack { Text("Connect Notion").font(.title3).fontWeight(.semibold); Spacer(); Text("\(step + 1) of 2").font(.caption).foregroundStyle(.secondary); Button("Cancel") { dismiss() } }
             Divider()
             if step == 0 {
@@ -42,8 +44,14 @@ struct NotionPageChoice: Identifiable, Equatable {
                 Spacer(minLength: 0)
                 HStack { Spacer(); Button(working ? "Checking…" : "Continue") { Task { await verify() } }.buttonStyle(.borderedProminent).disabled(working) }
             } else {
-                Text("Choose a home for meeting pages").font(.system(size: 19, weight: .semibold))
-                Text("Each meeting gets a separate subpage inside the page you choose. Your meetings stay separate; the parent page is only their home.").font(.callout).foregroundStyle(.secondary)
+                Text("Where should new pages appear?").font(.system(size: 19, weight: .semibold))
+                Picker("Destination", selection: $destination) {
+                    Text("Private · top level").tag("workspace").disabled(!canCreatePrivate)
+                    Text("Inside a page").tag("page")
+                }.pickerStyle(.segmented).labelsHidden()
+                Text(destination == "workspace" ? "Each new meeting becomes its own page under Private, alongside your other notes. No parent page needed." : "Each meeting gets a separate subpage inside your selected page.").font(.callout).foregroundStyle(.secondary)
+                if !canCreatePrivate { Text("Top-level pages require a personal access token. Use Back to replace your internal connection token.").font(.caption).foregroundStyle(.secondary) }
+                if destination == "page" {
                 TextField("Find a Notion page", text: $query).textFieldStyle(.roundedBorder)
                 List(pages) { page in
                     Button { selected = page.id } label: { HStack { Image(systemName: "doc").foregroundStyle(.secondary); Text(page.title).lineLimit(1); Spacer(); if selected == page.id { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) } }.padding(.vertical, 5).contentShape(Rectangle()) }.buttonStyle(.plain)
@@ -56,12 +64,13 @@ struct NotionPageChoice: Identifiable, Equatable {
                 DisclosureGroup("My page isn’t listed", isExpanded: $manual) {
                     VStack(alignment: .leading, spacing: 7) { Text("Copy its link from Notion and paste it below. Internal connections must be added to that page first.").font(.caption).foregroundStyle(.secondary); TextField("Notion page link", text: $manualURL).textFieldStyle(.roundedBorder) }.padding(.top, 6)
                 }.font(.caption)
-                HStack { Button("Back") { step = 0 }; Spacer(); Button(working ? "Connecting…" : "Save meetings here") { Task { await finish() } }.buttonStyle(.borderedProminent).disabled(working) }
+                } else { Spacer(minLength: 16); Label("New meeting → New private page", systemImage: "doc.badge.plus").font(.callout); Spacer(minLength: 0) }
+                HStack { Button("Back") { step = 0 }; Spacer(); Button(working ? "Connecting…" : destination == "workspace" ? "Use Private pages" : "Save meetings here") { Task { await finish() } }.buttonStyle(.borderedProminent).disabled(working) }
             }
             if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-        }.padding(24).frame(width: 490, height: 550)
+        }.padding(24).frame(minHeight: 500, alignment: .topLeading) }.frame(width: 490, height: 550)
         .onAppear {
-            if UserDefaults.standard.bool(forKey: "notionEnabled"), let saved = try? CloudKey.read(service: "notion"), !saved.isEmpty { verifiedKey = saved; step = 1 }
+            if UserDefaults.standard.bool(forKey: "notionEnabled"), let saved = try? CloudKey.read(service: "notion"), !saved.isEmpty { verifiedKey = saved; step = 1; Task { await checkOwner() } }
         }
     }
     private func verify() async {
@@ -70,10 +79,19 @@ struct NotionPageChoice: Identifiable, Equatable {
             let entered = token.trimmingCharacters(in: .whitespacesAndNewlines)
             let key = entered.isEmpty ? try CloudKey.read(service: "notion") : entered
             guard !key.isEmpty else { throw AppFailure("Open Notion’s token page, create a token with Notion API access, then paste it above.") }
-            _ = try await NotionClient(token: key).call("users/me")
-            verifiedKey = key; step = 1
+            verifiedKey = key
+            try await readOwner()
+            step = 1
         } catch { message = error.localizedDescription }
     }
+    private func readOwner() async throws {
+        let me = try await NotionClient(token: verifiedKey).call("users/me")
+        let bot = me["bot"] as? [String: Any]
+        let owner = bot?["owner"] as? [String: Any]
+        canCreatePrivate = owner?["type"] as? String == "user"
+        destination = canCreatePrivate ? "workspace" : "page"
+    }
+    private func checkOwner() async { do { try await readOwner() } catch { message = error.localizedDescription } }
     private func loadPages(more: Bool = false) async {
         working = true; message = ""; defer { working = false }
         do {
@@ -91,6 +109,13 @@ struct NotionPageChoice: Identifiable, Equatable {
     private func finish() async {
         working = true; message = ""; defer { working = false }
         do {
+            if destination == "workspace" {
+                guard canCreatePrivate else { throw AppFailure("Use a personal access token for top-level private pages.") }
+                try CloudKey.save(verifiedKey, service: "notion")
+                let defaults = UserDefaults.standard
+                defaults.set("workspace", forKey: "notionDestinationKind"); defaults.set("Private", forKey: "notionDestinationTitle"); defaults.set("", forKey: "notionParentPage"); defaults.set(true, forKey: "notionEnabled")
+                dismiss(); return
+            }
             let choice = pages.first { $0.id == selected }
             let id: String
             if manual && !manualURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { id = try NotionClient.identifier(manualURL) }

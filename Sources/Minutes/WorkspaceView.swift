@@ -12,6 +12,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
     @ObservedObject private var notion = NotionSync.shared
     @AppStorage("includeComputer") private var includeComputer = false
     @State private var sidebar = true
+    @State private var showCalendar = false
     @State private var setup: SettingsRoute?
     @State private var detailsID: UUID?
     @State private var editingID: UUID?
@@ -34,10 +35,17 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             if sidebar { sidebarView.frame(width: 232); Divider() }
             VStack(spacing: 0) {
                 header
-                ScrollView { if let meeting { document(meeting).id(meeting.id) } else { welcome } }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                footer
+                if showCalendar {
+                    MeetingCalendarView { event in openEvent(event) }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView { if let meeting { document(meeting).id(meeting.id) } else { welcome } }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    footer
+                }
             }.background(Color(nsColor: .textBackgroundColor))
         }.tint(Color.primary)
+        .sheet(isPresented: Binding(get: { pipeline.finishID != nil }, set: { if !$0 { pipeline.finishID = nil } })) {
+            if let id = pipeline.finishID { FinishNotesView(id: id).environmentObject(store).environmentObject(recorder).environmentObject(pipeline).interactiveDismissDisabled() }
+        }
         .sheet(item: $setup, onDismiss: {
             if (UserDefaults.standard.bool(forKey: "openRouterEnabled") || (NotesAIProvider.selected == .apple && AppleAIAvailability.current.available)), let meeting, meeting.pipelineStatus == "needsKey", processingAvailable { pipeline.resume(id: meeting.id, store: store, recorder: recorder) }
         }) { route in AppSettingsView(initialTab: route.tab).environmentObject(calendar) }
@@ -51,10 +59,10 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 HStack { Button("Cancel") { editingID = nil }; Spacer(); Button("Save") { if let id = editingID { store.update(id) { $0.summary = draft; $0.actions = [] }; if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await notion.sync(id: id, store: store) } } }; editingID = nil }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 560)
         }
-        .confirmationDialog("Replace the AI notes?", isPresented: $regenerate) { Button("Generate again") { if let meeting { pipeline.resume(id: meeting.id, store: store, recorder: recorder) } } } message: { Text("Your own notes and transcript are kept.") }
+        .confirmationDialog("Replace the AI notes?", isPresented: $regenerate) { Button("Choose detail level…") { if let meeting { pipeline.finishID = meeting.id } } } message: { Text("Your own notes and transcript are kept.") }
         .confirmationDialog("Transcribe the recordings again?", isPresented: $transcribeAgain) { Button("Transcribe & make notes") { if let meeting { pipeline.retranscribe(id: meeting.id, store: store, recorder: recorder) } } } message: { Text("Apple will refresh the transcript from your saved audio.") }
         .confirmationDialog("Permanently delete this note and its recordings?", isPresented: Binding(get: { deletingID != nil }, set: { if !$0 { deletingID = nil } })) { Button("Delete permanently", role: .destructive) { if let id = deletingID { store.deleteForever(id) }; deletingID = nil } }
-        .onChange(of: store.selectedID) { _, _ in pane = meeting?.summary.isEmpty == false ? "AI notes" : "Notes"; recordingsOpen = false }
+        .onChange(of: store.selectedID) { _, _ in showCalendar = false; pane = meeting?.summary.isEmpty == false ? "AI notes" : "Notes"; recordingsOpen = false }
         .onChange(of: meeting?.notes) { _, _ in
             syncDelay?.cancel()
             guard let note = meeting, note.notionPageID != nil, UserDefaults.standard.bool(forKey: "notionAutoSync") else { return }
@@ -64,6 +72,8 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             }
         }
         .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("--preview-calendar") { showCalendar = true }
+            if ProcessInfo.processInfo.arguments.contains("--preview-finish"), let id = store.selectedID { pipeline.finishID = id }
             if ProcessInfo.processInfo.arguments.contains("--preview-connections") || ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-google") { openSettings("Connections") }
             if ProcessInfo.processInfo.arguments.contains("--preview-settings") { openSettings("General") }
             if UserDefaults.standard.bool(forKey: "notionAutoSync") {
@@ -78,11 +88,12 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
         VStack(alignment: .leading, spacing: 0) {
             HStack { Image(systemName: "waveform").font(.system(size: 16)); Text("Minutes").font(.system(size: 14, weight: .semibold)); Spacer(); Button { store.create() } label: { Image(systemName: "square.and.pencil") }.help("New note · ⌘N").accessibilityLabel("New note") }.buttonStyle(.plain).padding(.horizontal, 18).padding(.top, 20).padding(.bottom, 22)
             HStack(spacing: 8) { Image(systemName: "magnifyingglass"); TextField("Search notes", text: $store.query).textFieldStyle(.plain) }.font(.system(size: 12)).foregroundStyle(.secondary).padding(9).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7)).padding(.horizontal, 12)
+            Button { showCalendar.toggle() } label: { HStack { Image(systemName: "calendar"); Text(showCalendar ? "Back to notes" : "Calendar"); Spacer() }.font(.system(size: 12)).padding(10).background(showCalendar ? Color.primary.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).padding(.horizontal, 12).padding(.top, 10)
             ScrollView {
                 VStack(alignment: .leading, spacing: 3) {
                     if calendar.authorized && store.query.isEmpty && store.filter != "Trash" {
                         HStack { sectionLabel("Upcoming"); Spacer(); Button { calendar.refresh() } label: { Image(systemName: "arrow.clockwise").font(.system(size: 10)) }.buttonStyle(.plain).help("Refresh events") }.padding(.horizontal, 9).padding(.top, 24).padding(.bottom, 5)
-                        ForEach(Array(calendar.events.prefix(showAllEvents ? calendar.events.count : 5))) { event in eventRow(event) }
+                        ForEach(Array(calendar.events.filter { $0.end > Date() }.prefix(showAllEvents ? calendar.events.count : 5))) { event in eventRow(event) }
                         if calendar.events.isEmpty { Text(calendar.message).font(.system(size: 11)).foregroundStyle(.secondary).padding(9) }
                         if calendar.events.count > 5 { Button(showAllEvents ? "Show less" : "View all events") { showAllEvents.toggle() }.font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(.secondary).padding(9) }
                     } else if !calendar.authorized && store.query.isEmpty {
@@ -100,8 +111,12 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             HStack { Button { openSettings("Connections") } label: { Label("Connections", systemImage: "link").font(.system(size: 12)) }; Spacer(); Button { openSettings("General") } label: { Image(systemName: "gearshape").font(.system(size: 13)) }.help("Settings").accessibilityLabel("Settings") }.foregroundStyle(.secondary).buttonStyle(.plain).padding(18)
         }.background(Color(nsColor: .windowBackgroundColor))
     }
+    private func openEvent(_ event: CalendarMeeting) {
+        showCalendar = false
+        if let id = store.open(event) { Task { await notion.sync(id: id, store: store) } }
+    }
     private func eventRow(_ event: CalendarMeeting) -> some View {
-        Button { if let id = store.open(event) { pane = "Notes"; Task { await notion.sync(id: id, store: store) } } } label: {
+        Button { openEvent(event) } label: {
             HStack(alignment: .top, spacing: 8) {
                 RoundedRectangle(cornerRadius: 2).fill(event.color).frame(width: 5, height: 23).padding(.top, 2)
                 VStack(alignment: .leading, spacing: 4) { Text(event.title).lineLimit(1).foregroundStyle(.primary); Text(eventTime(event.start)).font(.system(size: 10)).foregroundStyle(.secondary) }; Spacer(minLength: 0)
@@ -109,7 +124,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
         }.buttonStyle(.plain).help(event.title + " · " + eventTime(event.start))
     }
     private func noteRow(_ note: Meeting) -> some View {
-        Button { store.selectedID = note.id } label: {
+        Button { showCalendar = false; store.selectedID = note.id } label: {
             HStack(spacing: 9) {
                 if protected(note.id) && recorder.recording { Circle().fill(Color.red).frame(width: 6, height: 6) }
                 else { Image(systemName: note.calendarEventKey == nil ? "note.text" : "calendar").font(.system(size: 12)).foregroundStyle(.secondary) }
@@ -126,8 +141,8 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
     private var header: some View {
         HStack(spacing: 16) {
             Button { withAnimation(.easeInOut(duration: 0.18)) { sidebar.toggle() } } label: { Image(systemName: "sidebar.left") }.help("Toggle sidebar").accessibilityLabel("Toggle sidebar")
-            Text(meeting?.eventCalendar ?? "Notes").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1); Spacer()
-            if let meeting {
+            Text(showCalendar ? "Calendar" : meeting?.eventCalendar ?? "Notes").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1); Spacer()
+            if let meeting, !showCalendar {
                 if let raw = meeting.notionURL, let url = URL(string: raw) { Link(destination: url) { Label("Open in Notion", systemImage: "arrow.up.right").font(.system(size: 11)) } }
                 Menu {
                     Button("Export notes…") { store.export(meeting) }
@@ -232,8 +247,8 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
     }
     @ViewBuilder private func recovery(_ note: Meeting) -> some View {
         if note.pipelineStatus == "needsKey" { HStack { Text("Transcript saved. Connect AI for a summary.").font(.caption).foregroundStyle(.secondary); Spacer(); Button("Connect AI") { openSettings("General") }.font(.caption) } }
-        else if ["failed", "paused"].contains(note.pipelineStatus ?? "") { VStack(alignment: .leading, spacing: 10) { Text(note.pipelineError ?? "Your recording is saved.").font(.callout).foregroundStyle(.secondary); Button("Finish notes") { pipeline.resume(id: note.id, store: store, recorder: recorder) }.disabled(!processingAvailable) }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8)) }
-        else if note.summary.isEmpty && (!note.audioFiles.isEmpty || !note.transcript.isEmpty || !note.notes.isEmpty) { Button("Make AI notes") { pipeline.resume(id: note.id, store: store, recorder: recorder) }.disabled(!processingAvailable) }
+        else if ["failed", "paused", "awaitingNotes"].contains(note.pipelineStatus ?? "") { VStack(alignment: .leading, spacing: 10) { Text(note.pipelineError ?? (note.pipelineStatus == "awaitingNotes" ? "Recording saved. Choose how much detail to keep." : "Your recording is saved.")).font(.callout).foregroundStyle(.secondary); Button("Finish notes") { pipeline.finishID = note.id }.disabled(!processingAvailable) }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8)) }
+        else if note.summary.isEmpty && (!note.audioFiles.isEmpty || !note.transcript.isEmpty || !note.notes.isEmpty) { Button("Make AI notes") { pipeline.finishID = note.id }.disabled(!processingAvailable) }
     }
     private func emptyPane(_ title: String, detail: String) -> some View { VStack(alignment: .leading, spacing: 8) { Text(title).font(.system(size: 14)); Text(detail).font(.system(size: 12)).foregroundStyle(.secondary) }.padding(.vertical, 18) }
     private func sectionLabel(_ text: String) -> some View { Text(text).font(.system(size: 11, weight: .medium)).foregroundStyle(.tertiary) }

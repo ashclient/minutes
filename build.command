@@ -15,7 +15,7 @@ export MACOSX_DEPLOYMENT_TARGET=14.0
 printf 'Checking Minutes…\n'
 check_dir="$(mktemp -d)"
 trap 'rm -rf "$check_dir"' EXIT
-xcrun swiftc -parse-as-library Sources/Minutes/Models.swift Sources/Minutes/AIClient.swift Checks/CoreChecks.swift -o "$check_dir/MinutesChecks"
+xcrun swiftc -parse-as-library Sources/Minutes/Models.swift Sources/Minutes/AIClient.swift Sources/Minutes/NotesLength.swift Checks/CoreChecks.swift -o "$check_dir/MinutesChecks"
 "$check_dir/MinutesChecks"
 printf 'Building Minutes for this Mac…\n' 
 if [[ "${MINUTES_RUN_TESTS:-0}" == "1" ]]; then

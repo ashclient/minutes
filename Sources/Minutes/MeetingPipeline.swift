@@ -5,6 +5,7 @@ import AVFoundation
     @Published private(set) var activeID: UUID?
     @Published private(set) var stage = ""
     @Published private(set) var message = ""
+    @Published var finishID: UUID?
     private var work: Task<Void, Never>?
     private var canCancel = false
     var working: Bool { work != nil }
@@ -77,8 +78,15 @@ import AVFoundation
             // Do not silently summarize an incomplete capture.
             if let failure = recorder.failure { throw AppFailure(failure + " Your saved tracks are in Details. Retry to process what was captured.") }
             self.canCancel = true
-            try await self.process(id: id, store: store, recorder: recorder)
+            self.state("awaitingNotes", "Recording saved. Choose how much detail to keep.", id: id, store: store)
+            self.finishID = id
         }
+    }
+    func finish(id: UUID, length: NotesLength, transcriptOnly: Bool = false, store: Store, recorder: Recorder) {
+        guard !working, !recorder.recording else { return }
+        store.selectedID = id
+        store.update(id) { $0.notesLength = length }; finishID = nil
+        run(id: id, store: store, cancel: true) { try await self.process(id: id, store: store, recorder: recorder, generateNotes: !transcriptOnly) }
     }
     func resume(id: UUID, store: Store, recorder: Recorder) {
         guard !working, !recorder.recording else { return }
@@ -105,7 +113,7 @@ import AVFoundation
         store.saveNow()
     }
 
-    private func process(id: UUID, store: Store, recorder: Recorder) async throws {
+    private func process(id: UUID, store: Store, recorder: Recorder, generateNotes: Bool = true) async throws {
         guard let snapshot = store.meetings.first(where: { $0.id == id }), !snapshot.trashed else { return }
         let legacyTranscript = snapshot.transcribedFiles == nil && !snapshot.transcript.isEmpty
         let done = Set(snapshot.transcribedFiles ?? (legacyTranscript ? snapshot.audioFiles : []))
@@ -161,6 +169,11 @@ import AVFoundation
                 throw AppFailure("The microphone received audio for \(Int(recorder.voicedDuration)) seconds, but Apple recognized only \(wordCount) words. The transcript is incomplete. Check the speech language and macOS Sound input, or paste a corrected transcript in Details. Your audio and notes are saved.")
             }
         }
+        if !generateNotes {
+            state("ready", "Recording and transcript saved", id: id, store: store)
+            if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await NotionSync.shared.sync(id: id, store: store) } }
+            return
+        }
         let usingApple = NotesAIProvider.selected == .apple
         if !usingApple && !UserDefaults.standard.bool(forKey: "openRouterEnabled") {
             state("needsKey", "Recording and transcript saved. Connect AI if you’d like a summary.", id: id, store: store)
@@ -176,8 +189,8 @@ import AVFoundation
         state("generating", "Writing your notes…", id: id, store: store)
         let source = ["USER NOTES:\n" + meeting.notes, "TRANSCRIPT:\n" + meeting.transcriptText].filter { !$0.isEmpty }.joined(separator: "\n\n")
         let result: SummaryResult
-        if usingApple { result = try await AppleNotesAI.summarize(source, progress: { text in self.message = text; store.progress = text }) }
-        else { result = try await AIClient(apiKey: key).summarize(source, progress: { text in self.message = text; store.progress = text }) }
+        if usingApple { result = try await AppleNotesAI.summarize(source, length: meeting.notesLength ?? .complete, progress: { text in self.message = text; store.progress = text }) }
+        else { result = try await AIClient(apiKey: key).summarize(source, length: meeting.notesLength ?? .complete, progress: { text in self.message = text; store.progress = text }) }
         try Task.checkCancellation()
         store.update(id) { $0.apply(result, originalTitle: meeting.title) }
         stage = "ready"; message = "Notes ready"
