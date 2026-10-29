@@ -211,7 +211,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             if pipeline.activeID == note.id && !pipeline.liveDraft.isEmpty {
                 Divider()
                 Label("Live draft · still being organized", systemImage: "pencil.line").font(.caption).foregroundStyle(.secondary)
-                NoteDocument(text: pipeline.liveDraft).equatable()
+                StreamingNotesView(text: pipeline.liveDraft, running: pipeline.working)
             }
             if !note.summary.isEmpty && !(pipeline.activeID == note.id && !pipeline.liveDraft.isEmpty) {
                 Divider()

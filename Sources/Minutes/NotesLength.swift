@@ -1,15 +1,17 @@
 import Foundation
 
 enum NotesLength: String, Codable, Sendable, CaseIterable, Identifiable {
-    case brief, detailed, complete
+    case auto, brief, detailed, complete
     var id: String { rawValue }
-    var title: String { switch self { case .brief: return "Brief"; case .detailed: return "Detailed"; case .complete: return "Full detail" } }
+    var title: String { switch self { case .auto: return "Auto"; case .brief: return "Brief"; case .detailed: return "Detailed"; case .complete: return "Full detail" } }
     var explanation: String { switch self {
+    case .auto: return "Review the lecture, then choose the useful level of detail. No word-count target."
     case .brief: return "Main topics and essential definitions. Up to 300 words for the entire lecture."
     case .detailed: return "Main topics, explanations, and selected examples. Up to 900 words total."
     case .complete: return "Thorough study notes: combine related ideas, retain explanations and worked examples, remove repetition."
     } }
     var instruction: String { switch self {
+    case .auto: return "AUTO STUDY NOTES: review all source material before choosing what belongs in the notes. Use the amount of explanation each concept needs to be understood and revised. No target length, word quota, minimum, or maximum. Combine related ideas, omit repeated or incidental material, and keep useful source-supported reasoning and examples. Do not pad the notes or invent missing context. Distinguish prices, quantities, standalone totals and transaction prices exactly as stated."
     case .brief: return "BRIEF STUDY NOTES: the whole lecture must fit within 300 words, not 300 per section. Focus on main topics and essential definitions. Omit worked examples, repeated explanations, incidental names and generic advice."
     case .detailed: return "MEDIUM STUDY NOTES: the whole lecture must fit within 900 words. Group main topics, explain key reasoning and include only the most useful source-supported examples. Do not transcribe every exchange."
     case .complete: return "The user chose comprehensive college study notes. Synthesize and reorganize concepts, not the speaker’s wording or sequence. Keep substantive definitions, reasoning, formulas, worked examples, exceptions and exam requirements. Combine repeated points and related explanations. Drop conversational questions, roll call, chatter, duplicate facts and obvious filler. There is no fixed word count, but every bullet must add distinct study value. Do not restate the transcript line by line."
@@ -45,8 +47,8 @@ enum StudyFormat: String, Codable, CaseIterable, Identifiable, Sendable {
 }
 enum StudyBudget {
     static func words(_ text: String) -> Int { text.split(whereSeparator: \.isWhitespace).count }
-    static func maximum(_ length: NotesLength) -> Int { switch length { case .brief: return 300; case .detailed: return 900; case .complete: return Int.max } }
-    static func evidenceWords(_ length: NotesLength) -> Int { switch length { case .brief: return 45; case .detailed: return 90; case .complete: return 180 } }
+    static func maximum(_ length: NotesLength) -> Int { switch length { case .brief: return 300; case .detailed: return 900; case .auto, .complete: return Int.max } }
+    static func evidenceWords(_ length: NotesLength) -> Int { switch length { case .brief: return 45; case .detailed: return 90; case .auto, .complete: return 180 } }
     // Whole-document guard. Preserve complete lines; never split a formula block.
     static func limit(_ text: String, words maximum: Int) -> String {
         guard words(text) > maximum else { return text }

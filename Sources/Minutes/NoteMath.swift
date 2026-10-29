@@ -12,9 +12,14 @@ enum NoteMath {
         for raw in markdown.components(separatedBy: "\n") {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if let delimiter = closing {
-                if line == delimiter { append(pending.joined(separator: "\n"), true); pending = []; closing = nil }
-                else { pending.append(raw) }; continue
+                if line == delimiter { if !pending.isEmpty { append(pending.joined(separator: "\n"), true) }; pending = []; closing = nil }
+                else if line.isEmpty || line.hasPrefix("#") || line.hasPrefix("- ") || line.hasPrefix("* ") || line.range(of: "^[0-9]+[.)] +", options: .regularExpression) != nil {
+                    if !pending.isEmpty { append(pending.joined(separator: "\n"), true) }
+                    pending = []; closing = nil
+                    if !line.isEmpty { append(raw, false) }
+                } else { pending.append(raw) }; continue
             }
+            if line == "]" || line == "\\]" { continue }
             if line == "$$" || line == "\\[" || line == "[" { closing = line == "$$" ? "$$" : line == "[" ? "]" : "\\]"; continue }
             if line.hasPrefix("$$"), line.hasSuffix("$$"), line.count > 4 { append(String(line.dropFirst(2).dropLast(2)), true) }
             else if line.hasPrefix("\\["), line.hasSuffix("\\]"), line.count > 4 { append(String(line.dropFirst(2).dropLast(2)), true) }

@@ -60,14 +60,26 @@ enum AppleTextBudget {
         var notes: [String] = []
         for (index, text) in parts.enumerated() {
             try Task.checkCancellation()
-            let purpose = "Extract only source-supported concepts in at most \(StudyBudget.evidenceWords(length)) words. Do not create coursework, numeric examples or definitions absent from this source. Omit unclear or incomplete examples rather than filling gaps."
-            let output = try await generate(text, instruction: purpose + " " + format.instruction, tokens: length == .brief ? 130 : length == .detailed ? 250 : 550, key: length.rawValue + format.rawValue, partial: { value in
+            let purpose = length == .auto ? "Review this source and extract the distinct concepts, essential reasoning and supported examples needed for study. Merge repetition. No length target. Preserve quantity labels exactly. Do not invent missing definitions, examples or assignments." : "Extract only source-supported concepts in at most \(StudyBudget.evidenceWords(length)) words. Do not create coursework, numeric examples or definitions absent from this source. Omit unclear or incomplete examples rather than filling gaps."
+            let output = try await generate(text, instruction: purpose + " " + format.instruction, tokens: length == .auto ? 1000 : length == .brief ? 130 : length == .detailed ? 250 : 550, key: length.rawValue + format.rawValue, partial: { value in
                 if length == .complete { partial(LectureNotes.organize(notes + [value])) }
             })
             notes.append(output)
             fraction(Double(index + 1) / Double(parts.count) * (length == .complete ? 1 : 0.65))
         }
         if length == .complete { return SummaryResult(summary: LectureNotes.organize(notes), decisions: [], actions: []) }
+        if length == .auto {
+            progress("Reviewing topics and choosing useful detail…")
+            let evidence = LectureNotes.organize(notes)
+            let groups = AppleTextBudget.chunks(evidence, bytes: 2400)
+            var reviewed: [String] = []
+            for (index, group) in groups.enumerated() {
+                let output = try await generate(group, instruction: length.instruction + " " + format.instruction + " These are reviewed source extracts from the whole lecture. Consolidate the topics here. Keep only supported content; correct no facts from outside knowledge. Close every formula delimiter before starting prose.", tokens: 1600, key: "auto-review-" + format.rawValue, partial: { value in partial(LectureNotes.organize(reviewed + [value])) })
+                reviewed.append(output)
+                fraction(0.65 + 0.35 * Double(index + 1) / Double(groups.count))
+            }
+            return SummaryResult(summary: LectureNotes.organize(reviewed), decisions: [], actions: [])
+        }
         // The final request represents the entire lecture, not one source chunk.
         // Reduce evidence recursively within Apple's small session context.
         var evidence = notes.joined(separator: "\n")

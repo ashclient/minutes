@@ -5,7 +5,7 @@ import SwiftUI
     @EnvironmentObject var recorder: Recorder
     @EnvironmentObject var store: Store
     let id: UUID
-    @State private var length: NotesLength = .complete
+    @State private var length: NotesLength = .auto
     @State private var format: StudyFormat = .outline
     @State private var step = 0
     @State private var transcriptOnly = false
@@ -16,7 +16,7 @@ import SwiftUI
     private var connected: Bool { UserDefaults.standard.bool(forKey: "notionEnabled") || ProcessInfo.processInfo.arguments.contains("--preview-delivery") }
     private var meeting: Meeting? { store.meetings.first { $0.id == id } }
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 13) {
             HStack { Text(step == 0 ? "How much detail would you like?" : "Where should the notes go?").font(.title2).fontWeight(.semibold); Spacer(); Text("\(step + 1) of 2").font(.caption).foregroundStyle(.secondary) }
             if step == 0 {
                 Text("Your recording is saved. Choose the notes you want to make from it.").foregroundStyle(.secondary)
@@ -27,7 +27,7 @@ import SwiftUI
                             Image(systemName: length == option ? "largecircle.fill.circle" : "circle").foregroundStyle(length == option ? Color.accentColor : .secondary)
                             VStack(alignment: .leading, spacing: 5) { Text(option.title).fontWeight(.medium); Text(option.explanation).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                             Spacer(minLength: 0)
-                        }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(length == option ? 0.07 : 0.025), in: RoundedRectangle(cornerRadius: 9))
+                        }.padding(11).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(length == option ? 0.07 : 0.025), in: RoundedRectangle(cornerRadius: 9))
                     }.buttonStyle(.plain)
                 }
                 HStack {
@@ -55,7 +55,7 @@ import SwiftUI
             }
         }.padding(26).frame(width: 490).onAppear {
             format = meeting?.studyFormat ?? .outline
-            length = meeting?.notesLength ?? .complete
+            length = meeting?.notesLength ?? .auto
             mode = connected ? (meeting?.notionPageID == nil ? .newPage : .linked) : .local
             if ProcessInfo.processInfo.arguments.contains("--preview-delivery") { step = 1; mode = .existing }
         }

@@ -11,6 +11,7 @@ enum LectureNotes {
         var current = -1
         for text in texts {
             current = -1
+            var inMath = false
             for raw in text.components(separatedBy: "\n") {
                 let line = raw.trimmingCharacters(in: .whitespaces)
                 if line.hasPrefix("## ") || line.hasPrefix("# ") {
@@ -23,6 +24,11 @@ enum LectureNotes {
                         if let i = headings.firstIndex(of: "Key concepts") { current = i }
                         else { headings.append("Key concepts"); bodies.append([]); seen.append([]); current = headings.count - 1 }
                     }
+                    if line == "$$" || line == "\\[" || line == "\\]" {
+                        inMath.toggle(); bodies[current].append(raw); continue
+                    }
+                    if inMath && !line.hasPrefix("#") && !line.hasPrefix("- ") && !line.hasPrefix("* ") { bodies[current].append(raw); continue }
+                    inMath = false
                     let key = line.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
                     if seen[current].insert(key).inserted { bodies[current].append(raw) }
                 }
