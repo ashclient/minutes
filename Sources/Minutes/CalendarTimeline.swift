@@ -39,7 +39,7 @@ struct CalendarTimeline: View {
                 ForEach(days, id: \.self) { day in
                     VStack(spacing: 4) {
                         Text(day.formatted(.dateTime.weekday(.abbreviated))).font(.system(size: 10)).foregroundStyle(.secondary)
-                        Text(day.formatted(.dateTime.day())).font(.system(size: 20, weight: .medium)).frame(width: 32, height: 32).background(Calendar.current.isDateInToday(day) ? Color.primary.opacity(0.1) : .clear, in: Circle())
+                        Text(day.formatted(.dateTime.day())).font(.system(size: 20, weight: .medium)).frame(width: 32, height: 32).foregroundStyle(Calendar.current.isDateInToday(day) ? Color.accentColor : Color.primary)
                         ForEach(events.filter { $0.allDay && CalendarLayout.contains($0, day: day) }) { event in
                             Button { open(event) } label: { Text(event.title).font(.system(size: 10)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).padding(3).background(event.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 3)) }.buttonStyle(QuietButtonStyle()).help(event.title)
                         }

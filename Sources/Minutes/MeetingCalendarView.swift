@@ -94,7 +94,7 @@ enum CalendarMode: String, CaseIterable { case day = "Day", week = "Week", month
         let chosen = Calendar.current.isDate(date, inSameDayAs: selected)
         return VStack(alignment: .leading, spacing: 4) {
             Button { selected = date } label: {
-                Text(date.formatted(.dateTime.day())).font(.system(size: 11, weight: Calendar.current.isDateInToday(date) ? .bold : .regular)).foregroundStyle(current ? Color.primary : Color.secondary.opacity(0.6)).frame(width: 22, height: 22).background(Calendar.current.isDateInToday(date) ? Color.accentColor.opacity(0.15) : Color.clear, in: Circle()).frame(maxWidth: .infinity, alignment: .leading)
+                Text(date.formatted(.dateTime.day())).font(.system(size: 11, weight: Calendar.current.isDateInToday(date) ? .bold : .regular)).foregroundStyle(current ? Color.primary : Color.secondary.opacity(0.6)).frame(width: 22, height: 22).frame(maxWidth: .infinity, alignment: .leading)
             }.buttonStyle(QuietButtonStyle())
             ForEach(Array(events.prefix(2))) { event in
                 Button { open(event) } label: { Text((event.allDay ? "" : event.start.formatted(.dateTime.hour().minute()) + " ") + event.title).font(.system(size: 9)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).padding(3).background(event.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 3)) }.buttonStyle(QuietButtonStyle()).help(event.title)

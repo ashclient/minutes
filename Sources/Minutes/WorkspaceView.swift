@@ -43,6 +43,10 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 }
             }.background(Color(nsColor: .textBackgroundColor))
         }.tint(Color.primary)
+        .confirmationDialog("Keep the notes generated so far?", isPresented: Binding(get: { pipeline.draftDecisionID != nil }, set: { _ in })) {
+            Button("Keep partial notes") { pipeline.resolveDraft(keep: true, store: store) }
+            Button("Revert to previous notes") { pipeline.resolveDraft(keep: false, store: store) }
+        } message: { Text("Your recording, transcript and custom notes are kept either way. Partial notes may not cover the whole lecture.") }
         .sheet(isPresented: Binding(get: { pipeline.finishID != nil }, set: { if !$0 { pipeline.finishID = nil } })) {
             if let id = pipeline.finishID { FinishNotesView(id: id).environmentObject(store).environmentObject(recorder).environmentObject(pipeline).interactiveDismissDisabled() }
         }
@@ -179,9 +183,9 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                     if !meeting.audioFiles.isEmpty { Button("Transcribe again…") { transcribeAgain = true }.disabled(!processingAvailable) }
                     Button("Sync to Notion") { sync(meeting.id) }
                     Divider(); Button("Move to Trash") { store.update(meeting.id) { $0.trashed = true }; store.selectedID = nil }.disabled(protected(meeting.id))
-                } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 22)
+                } label: { Text("Note actions") }.menuStyle(.borderlessButton).frame(width: 100)
             }
-            Menu { Button("Import audio…", action: importAudio); Button("Import notes or backup…") { store.importText() }; Button("Export backup…") { store.export() } } label: { Image(systemName: "plus") }.menuStyle(.borderlessButton).frame(width: 16).help("Import & export")
+            Menu { Button("Import audio…", action: importAudio); Button("Import notes or backup…") { store.importText() }; Button("Export backup…") { store.export() } } label: { Text("Files") }.menuStyle(.borderlessButton).frame(width: 65).help("Import & export")
         }.buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).padding(.horizontal, 24).frame(height: 53)
     }
     private func document(_ note: Meeting) -> some View {
@@ -204,7 +208,12 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                     TextEditor(text: Binding(get: { meeting?.notes ?? "" }, set: { value in store.update(note.id) { $0.notes = value } })).font(.system(size: 14)).lineSpacing(6).scrollContentBackground(.hidden).frame(minHeight: note.summary.isEmpty ? 220 : 130)
                 }
             }
-            if !note.summary.isEmpty {
+            if pipeline.activeID == note.id && !pipeline.liveDraft.isEmpty {
+                Divider()
+                Label("Live draft · still being organized", systemImage: "pencil.line").font(.caption).foregroundStyle(.secondary)
+                NoteDocument(text: pipeline.liveDraft).equatable()
+            }
+            if !note.summary.isEmpty && !(pipeline.activeID == note.id && !pipeline.liveDraft.isEmpty) {
                 Divider()
                 HStack {
                     Text("Meeting notes").font(.system(size: 14, weight: .semibold)); Spacer()

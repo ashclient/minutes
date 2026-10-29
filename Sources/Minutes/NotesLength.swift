@@ -7,12 +7,12 @@ enum NotesLength: String, Codable, Sendable, CaseIterable, Identifiable {
     var explanation: String { switch self {
     case .brief: return "A quick overview, key outcomes, and next steps."
     case .detailed: return "Clear, thorough notes with explanations and examples."
-    case .complete: return "Keep every substantive point, worked example, caveat, and question. No word-count target."
+    case .complete: return "Thorough study notes: combine related ideas, retain explanations and worked examples, remove repetition."
     } }
     var instruction: String { switch self {
     case .brief: return "The user chose BRIEF. Prioritize the main ideas and explicit outcomes. Omit incidental examples, but retain critical numbers, qualifications, and deadlines."
     case .detailed: return "The user chose DETAILED. Capture every substantive topic with its explanation, evidence, examples, and qualifications. Do not force a word limit or collapse distinct ideas into a vague summary."
-    case .complete: return "The user chose FULL DETAIL, not a condensed summary. Preserve all substantive material: definitions, reasoning, step-by-step worked examples, formulas, calculations, names, numbers, dates, exceptions, disagreements, corrections, questions and answers, and explicit instructions. Remove only filler and exact repetitions. Length should follow the source; there is no word-count target. Never replace detailed reasoning with a vague one-line takeaway."
+    case .complete: return "The user chose comprehensive college study notes. Synthesize and reorganize concepts, not the speaker’s wording or sequence. Keep substantive definitions, reasoning, formulas, worked examples, exceptions and exam requirements. Combine repeated points and related explanations. Drop conversational questions, roll call, chatter, duplicate facts and obvious filler. There is no fixed word count, but every bullet must add distinct study value. Do not restate the transcript line by line."
     } }
     static func combine(_ sections: [SummaryResult]) -> SummaryResult {
         var decisions = Set<String>(), actions = Set<String>()

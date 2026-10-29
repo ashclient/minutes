@@ -7,6 +7,8 @@ import AVFoundation
     @Published private(set) var message = ""
     @Published var finishID: UUID?
     @Published private(set) var progressFraction: Double?
+    @Published var liveDraft = ""
+    @Published var draftDecisionID: UUID?
     private var work: Task<Void, Never>?
     private var canCancel = false
     private let transcriptUpdates = TranscriptUpdates()
@@ -20,12 +22,13 @@ import AVFoundation
     }
     private func run(id: UUID, store: Store, cancel: Bool, operation: @escaping @MainActor () async throws -> Void) {
         guard work == nil else { return }
-        activeID = id; canCancel = cancel; store.busy = true
+        liveDraft = ""; activeID = id; canCancel = cancel; store.busy = true
         work = Task {
             defer { store.busy = false; store.saveNow(); work = nil; canCancel = false }
             do { try await operation() }
             catch {
                 let cancelled = Task.isCancelled || error is CancellationError
+                if !liveDraft.isEmpty { draftDecisionID = id }
                 stage = cancelled ? "paused" : "failed"
                 message = cancelled ? "Paused. Your recording and completed transcript are saved." : error.localizedDescription
                 store.update(id) { $0.pipelineStatus = stage; $0.pipelineError = message }
@@ -100,6 +103,11 @@ import AVFoundation
         guard !working, !recorder.recording else { return }
         store.update(id) { $0.transcribedFiles = [] }
         resume(id: id, store: store, recorder: recorder)
+    }
+    func resolveDraft(keep: Bool, store: Store) {
+        guard let id = draftDecisionID else { return }
+        if keep && !liveDraft.isEmpty { store.update(id) { $0.summary = liveDraft; $0.actions = []; $0.pipelineStatus = "ready"; $0.pipelineError = nil } }
+        liveDraft = ""; draftDecisionID = nil; stage = "ready"; message = "Notes saved"; store.saveNow()
     }
     func cancel() { if canCancel { work?.cancel() } }
     func prepareForQuit(store: Store, recorder: Recorder) {
@@ -194,10 +202,11 @@ import AVFoundation
         state("generating", "Writing your notes…", id: id, store: store)
         let source = ["USER NOTES:\n" + meeting.notes, "TRANSCRIPT:\n" + meeting.transcriptText].filter { !$0.isEmpty }.joined(separator: "\n\n")
         let result: SummaryResult
-        if usingApple { result = try await AppleNotesAI.summarize(source, length: meeting.notesLength ?? .complete, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }) }
+        if usingApple { result = try await AppleNotesAI.summarize(source, length: meeting.notesLength ?? .complete, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }, partial: { if !Task.isCancelled && self.activeID == id && self.stage == "generating" { self.liveDraft = $0 } }) }
         else { result = try await AIClient(apiKey: key).summarize(source, length: meeting.notesLength ?? .complete, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }) }
         try Task.checkCancellation()
         store.update(id) { $0.apply(result, originalTitle: meeting.title) }
+        liveDraft = ""
         stage = "ready"; message = "Notes ready"
         if meeting.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) { Task { await NotionSync.shared.sync(id: id, store: store) } }
     }
