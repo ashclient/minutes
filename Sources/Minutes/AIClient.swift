@@ -9,11 +9,14 @@ enum CloudAIProvider: String, Sendable {
     var service: String { rawValue }
     var enabledKey: String { self == .nvidia ? "nvidiaEnabled" : "openRouterEnabled" }
     var endpoint: URL { self == .nvidia ? URL(string: "https://integrate.api.nvidia.com/v1/chat/completions")! : URL(string: "https://openrouter.ai/api/v1/chat/completions")! }
-    static let fixedOpenRouterModel = "qwen/qwen3.8-27b:free"
+    static let fixedOpenRouterModel = "nvidia/nemotron-3.5-lightning:free"
+    static func resolvedOpenRouterModel(_ saved: String?) -> String {
+        let value = saved?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty || value == "qwen/qwen3.8-27b:free" ? fixedOpenRouterModel : value
+    }
     var model: String {
         if self == .nvidia { return "nvidia/nemotron-3.5-lightning-30b-a3b" }
-        let saved = UserDefaults.standard.string(forKey: "openRouterModel")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return saved.isEmpty ? Self.fixedOpenRouterModel : saved
+        return Self.resolvedOpenRouterModel(UserDefaults.standard.string(forKey: "openRouterModel"))
     }
     var keyURL: URL { self == .nvidia ? URL(string: "https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b")! : URL(string: "https://openrouter.ai/settings/keys")! }
 }
@@ -100,7 +103,7 @@ struct AIClient: Sendable {
             switch status {
             case 401, 403: throw AppFailure("\(provider.title) rejected this key or request. Check the key and your account’s API access.")
             case 402: throw AppFailure("\(provider.title) blocked this request because of account credit limits. Your transcript is saved.")
-            case 404, 410: throw AppFailure("The selected \(provider.title) model is unavailable or retired. Check for a Minutes update; your notes are saved.")
+            case 404, 410: throw AppFailure("The selected \(provider.title) model is unavailable or retired. Choose an available model in Settings → General and test it again. Your notes are saved.")
             case 429: throw AppFailure("\(provider.title)’s usage limit was reached. Your transcript is saved. Try again after your limit resets.")
             case 408, 502, 503, 504: throw AppFailure("\(provider.title) is busy or unavailable right now. Your transcript is saved; try again shortly.")
             case 202: throw AppFailure("\(provider.title) queued this request instead of completing it. Try again shortly; your current notes are kept.")
@@ -268,10 +271,10 @@ struct AIClient: Sendable {
             let show: @MainActor (String) -> Void = { text in
                 partial(StudyBudget.limit(prefix.isEmpty ? text : prefix + "\n\n" + text, words: StudyBudget.maximum(length)))
             }
-            await progress("Writing draft \(index + 1) of \(parts.count) · streaming…")
+            await progress("Writing draft \(index + 1) of \(parts.count)…")
             let section = try await generate(system: system, text: "<source section=\"\(index + 1)\" total=\"\(parts.count)\">\n\(part)\n</source>", partial: show)
             await fraction(Double(index * 2 + 1) / Double(steps))
-            await progress("Checking draft \(index + 1) of \(parts.count) against your transcript · streaming…")
+            await progress("Checking draft \(index + 1) of \(parts.count) against your transcript…")
             let previous = index > 0 ? String(parts[index - 1].suffix(2000)) : ""
             let checked = try await generate(system: system + "\n" + NotesLength.reviewPrompt,
                 text: "PREVIOUS SECTION (context only, do not repeat):\n" + previous + "\nORIGINAL SOURCE FOR THIS SECTION:\n" + part + "\nDRAFT TO CHECK:\n" + section.summary, partial: show)
@@ -281,7 +284,7 @@ struct AIClient: Sendable {
         let combined = NotesLength.combine(reviewed)
         var result = combined
         if consolidate {
-            await progress("Combining topics across the lecture · streaming…")
+            await progress("Combining topics across the lecture…")
             result = try await generate(system: system + "\nConsolidate these extracts for the ENTIRE lecture. The selected length instruction takes priority over the detail retained in the extracts. Apply its whole-document requirements; Auto should be concise and selective. Merge synonymous topics and remove duplication across sections. No invented assignments or examples.", text: combined.summary, partial: { partial(StudyBudget.limit($0, words: StudyBudget.maximum(length))) })
         }
         try Task.checkCancellation()
@@ -336,5 +339,36 @@ struct CloudEventStream {
             throw AppFailure("\(provider.title)’s stream ended before the notes finished. Your previous notes are kept; retry or keep the partial draft.")
         }
         return try CloudNotesParser.parse(content)
+    }
+}
+
+struct OpenRouterCatalogModel: Identifiable, Sendable {
+    let id: String
+    let name: String
+}
+enum OpenRouterCatalog {
+    static func parse(_ data: Data) throws -> [OpenRouterCatalogModel] {
+        struct Envelope: Decodable {
+            struct Model: Decodable {
+                struct Price: Decodable { let prompt: String; let completion: String }
+                struct Architecture: Decodable { let output_modalities: [String]? }
+                let id: String; let name: String; let context_length: Int?
+                let pricing: Price; let architecture: Architecture?
+            }
+            let data: [Model]
+        }
+        let catalog = try JSONDecoder().decode(Envelope.self, from: data)
+        return catalog.data.filter {
+            $0.id.hasSuffix(":free") && $0.id != "openrouter/free" &&
+            Double($0.pricing.prompt) == 0 && Double($0.pricing.completion) == 0 &&
+            ($0.context_length ?? 0) >= 64000 && ($0.architecture?.output_modalities ?? ["text"]).contains("text")
+        }.map { OpenRouterCatalogModel(id: $0.id, name: $0.name) }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+    static func load(session: URLSession = .shared) async throws -> [OpenRouterCatalogModel] {
+        var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/models")!)
+        request.timeoutInterval = 20
+        let (data, response) = try await session.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw AppFailure("Could not load the OpenRouter model list. Your saved choice is unchanged.") }
+        return try parse(data)
     }
 }

@@ -74,4 +74,16 @@ final class CloudStreamingTests: XCTestCase {
         XCTAssertNil(body["models"]); XCTAssertNil(body["response_format"])
         XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "text/event-stream")
     }
+    func testRetiredDefaultMigratesWithoutChangingCustomModels() {
+        XCTAssertEqual(CloudAIProvider.resolvedOpenRouterModel("qwen/qwen3.8-27b:free"), "nvidia/nemotron-3.5-lightning:free")
+        XCTAssertEqual(CloudAIProvider.resolvedOpenRouterModel("my/custom-model"), "my/custom-model")
+        XCTAssertEqual(CloudAIProvider.resolvedOpenRouterModel(nil), CloudAIProvider.fixedOpenRouterModel)
+    }
+    func testLiveCatalogListsOnlyFreeTextModelsWithEnoughContext() throws {
+        func model(_ id: String, prompt: String = "0", context: Int = 100000, output: String = "text") -> [String: Any] {
+            ["id": id, "name": id, "context_length": context, "pricing": ["prompt": prompt, "completion": "0"], "architecture": ["output_modalities": [output]]]
+        }
+        let data = try JSONSerialization.data(withJSONObject: ["data": [model("good/model:free"), model("paid/model:free", prompt: "0.1"), model("small/model:free", context: 4096), model("image/model:free", output: "image"), model("openrouter/free")]])
+        XCTAssertEqual(try OpenRouterCatalog.parse(data).map(\.id), ["good/model:free"])
+    }
 }

@@ -1,10 +1,11 @@
-# Minutes 2.6.1
+# Minutes 2.6.2
 
-- OpenRouter now defaults to a pinned Qwen3.8 27B free model instead of random free routing. Edit the model ID in General settings or Reset to the default. Free endpoint quotas and capacity still apply; non-free IDs may incur OpenRouter charges.
-- Both NVIDIA and OpenRouter now request real streaming Markdown and show live drafts in Minutes, including the source-check pass. Reasoning fields and JSON wrappers are kept out of the live draft.
-- Cloud progress counts completed draft/check/consolidation passes rather than jumping to 85%. It measures work completed, not estimated time remaining.
-- Most lectures fit one large source chunk; their checked notes no longer need an extra consolidation request. Longer sources retain every character and process in order, with one cloud request at a time to reduce rate-limit pressure.
-- Connection tests now accept short successful replies such as OK, instead of rejecting them for not looking like study notes.
-- Interrupted streams, truncation and provider errors preserve saved notes. Cancel still offers keep partial draft or revert.
+- Removed the “streaming…” suffix from cloud generation status messages.
+- Apple Intelligence now displays its actual working draft while selecting concepts for Auto, Brief and Detailed, instead of hiding all intermediate text until the final writing pass. Full detail continues to stream as before.
+- Apple draft updates are delivered more frequently through the existing smooth reveal. Brief and Detailed preview budgets remain enforced; final consolidation may revise provisional text.
+- Apple still processes small source chunks sequentially because of its local context limit. This improves time to visible output, not the model's inference speed or total number of necessary passes.
+- Fixed the unavailable OpenRouter default: Nemotron 3.5 Lightning’s free endpoint replaces the old Qwen ID. The old default migrates automatically; custom choices stay unchanged.
+- General settings now fetches a live list of free text models with sufficient context, with Refresh and a custom ID field. Selection stays pinned; model availability is not guaranteed by catalog listing.
+- Updated the built-in guide to describe OpenRouter’s pinned default.
 
-Native tests use synthetic streamed responses; live provider capacity, speed and quality depend on your account and model. Current ad-hoc app signatures may still require renewed Keychain authorization after updates.
+Includes 2.6.1's cloud streaming and improved connection checks. Actual Apple inference requires an eligible Mac with macOS 27 and Apple Intelligence enabled; CI verifies draft handling without running the local model.

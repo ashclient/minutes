@@ -63,9 +63,10 @@ enum AppleTextBudget {
         var notes: [String] = []
         for (index, text) in parts.enumerated() {
             try Task.checkCancellation()
+            progress("Selecting key concepts · draft \(index + 1) of \(parts.count)…")
             let purpose = length == .auto ? "Collect concise factual evidence for useful class notes. Keep each main concept with its meaning, necessary conditions and formula, not an isolated keyword. Retain a representative worked example only with its complete setup, labelled quantities and result; do not collect every similar exercise. Merge repetition and omit chatter or incomplete fragments. No length target. Preserve quantity roles and units exactly. Do not invent definitions, examples or assignments." : "Extract only source-supported concepts in at most \(StudyBudget.evidenceWords(length)) words. Do not create coursework, numeric examples or definitions absent from this source. Omit unclear or incomplete examples rather than filling gaps."
             let output = try await generate(text, instruction: purpose + " " + format.instruction, tokens: length == .auto ? 450 : length == .brief ? 130 : length == .detailed ? 250 : 550, key: length.rawValue + format.rawValue, partial: { value in
-                if length == .complete { partial(LectureNotes.organize(notes + [value])) }
+                partial(workingDraft(notes, pending: value, length: length))
             })
             notes.append(output)
             fraction(Double(index + 1) / Double(parts.count) * (length == .complete ? 1 : 0.65))
@@ -92,6 +93,11 @@ enum AppleTextBudget {
         fraction(1)
         return SummaryResult(summary: StudyBudget.limit(final, words: StudyBudget.maximum(length)), decisions: [], actions: [])
     }
+    // Expose the actual provisional notes while evidence is selected; final
+    // consolidation can revise them. Saved notes remain untouched until finish.
+    static func workingDraft(_ sections: [String], pending: String, length: NotesLength) -> String {
+        StudyBudget.limit(LectureNotes.organize(sections + [pending]), words: StudyBudget.maximum(length))
+    }
     @available(macOS 26.0, *)
     private static func generate(_ text: String, instruction: String, tokens: Int, key cacheTag: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
         let key = "lecture-v6:" + cacheTag + instruction + "\n" + text
@@ -103,7 +109,7 @@ enum AppleTextBudget {
             for try await snapshot in session.streamResponse(to: "<source>\n" + text + "\n</source>", options: GenerationOptions(sampling: .greedy, maximumResponseTokens: tokens)) {
                 try Task.checkCancellation()
                 output = snapshot.content
-                if Date().timeIntervalSince(last) > 0.7 { partial(output); last = Date() }
+                if Date().timeIntervalSince(last) > 0.12 { partial(output); last = Date() }
             }
             try Task.checkCancellation(); partial(output)
             return output.trimmingCharacters(in: .whitespacesAndNewlines)
