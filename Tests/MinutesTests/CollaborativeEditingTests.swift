@@ -106,6 +106,17 @@ final class CollaborativeEditingTests: XCTestCase {
         reveal.update("Immediate", immediate: true)
         XCTAssertEqual(reveal.visible, "Immediate"); XCTAssertTrue(reveal.removedPreview.isEmpty)
     }
+    func testContinuousRetargetingDoesNotStarveDeletionAnimation() {
+        var reveal = DraftReveal(); let original = "## Topic\n" + String(repeating: "Old detail. ", count: 30)
+        reveal.update(original, immediate: true)
+        for index in 1...20 {
+            reveal.update("## Topic\nNew concise detail " + String(repeating: ".", count: index))
+            reveal.tick(); reveal.tick()
+        }
+        XCTAssertNotEqual(reveal.visible, original)
+        for _ in 0..<150 { reveal.tick() }
+        XCTAssertEqual(reveal.visible, "## Topic\nNew concise detail " + String(repeating: ".", count: 20))
+    }
     func testEvidenceSelectionIsBoundedAndComesFromActualSource() {
         let source = "Unrelated weather discussion.\n" + String(repeating: "Unrelated chatter. ", count: 90) + "\nAllocation uses relative standalone prices: 360 and 240."
         let excerpt = NoteEvidence.excerpts(for: "Allocation standalone prices", source: source, limit: 1800)

@@ -47,7 +47,7 @@ struct LiveNoteSection: Identifiable, Equatable, Sendable {
         var results = [Output?](repeating: nil, count: inputs.count)
         defer { activity([]) }
         return try await withThrowingTaskGroup(of: (Int, Int, Output).self) { group in
-            func start(_ index: Int, worker: Int) {
+            @MainActor func start(_ index: Int, worker: Int) {
                 active[worker] = label(index)
                 activity(active.keys.sorted().map { NoteWorker(id: $0, task: active[$0]!) })
                 group.addTask { @MainActor in

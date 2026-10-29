@@ -17,6 +17,7 @@ struct DraftReveal {
         }
         guard value != target else { return }
         target = value
+        let wasDeleting = remainingRemoval > 0 || !removedPreview.isEmpty
         let next = Array(value), old = characters
         var prefix = 0
         while prefix < min(old.count, next.count), old[prefix] == next[prefix] { prefix += 1 }
@@ -25,7 +26,7 @@ struct DraftReveal {
         start = prefix; remainingRemoval = old.count - prefix - suffix; inserted = 0
         insert = Array(next[prefix..<(next.count - suffix)])
         removedPreview = remainingRemoval > 0 ? String(old[prefix..<(old.count - suffix)].prefix(180)) : ""
-        hold = remainingRemoval > 0 ? 3 : 0
+        hold = remainingRemoval > 0 && !wasDeleting ? 2 : 0
         editingPart = max(0, NoteMath.parts(String(old.prefix(prefix))).count - 1)
     }
     mutating func tick() {
