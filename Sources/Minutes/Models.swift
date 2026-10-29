@@ -64,7 +64,7 @@ enum RecordingTrack {
         return "Recording"
     }
 }
-struct SummaryResult: Codable {
+struct SummaryResult: Sendable, Codable {
     var title: String? = nil
     var summary: String
     var decisions: [String]

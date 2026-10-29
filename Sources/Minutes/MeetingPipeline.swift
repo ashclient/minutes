@@ -6,13 +6,15 @@ import AVFoundation
     @Published private(set) var stage = ""
     @Published private(set) var message = ""
     @Published var finishID: UUID?
+    @Published private(set) var progressFraction: Double?
     private var work: Task<Void, Never>?
     private var canCancel = false
+    private let transcriptUpdates = TranscriptUpdates()
     var working: Bool { work != nil }
     var cancellable: Bool { working && canCancel }
 
     private func state(_ value: String, _ text: String, id: UUID, store: Store) {
-        stage = value; message = text
+        stage = value; message = text; progressFraction = value == "generating" ? 0 : nil
         store.progress = text
         store.update(id) { $0.pipelineStatus = value; $0.pipelineError = nil }
     }
@@ -30,6 +32,11 @@ import AVFoundation
             }
         }
     }
+    func showProgressPreview(id: UUID) {
+        guard ProcessInfo.processInfo.arguments.contains("--preview-progress") else { return }
+        activeID = id; stage = "generating"; message = "Writing your notes…"; progressFraction = 0.62
+        work = Task { try? await Task.sleep(nanoseconds: 20_000_000_000) }
+    }
     func start(store: Store, recorder: Recorder) {
         guard !working, !recorder.recording else { return }
         let draft = store.meetings.first { $0.id == store.selectedID && !$0.trashed }
@@ -42,11 +49,7 @@ import AVFoundation
         recorder.onLiveText = { lines, file in
             var tagged = lines
             for i in tagged.indices { tagged[i].audioFile = file; tagged[i].seconds += offset }
-            store.update(id) { meeting in
-                meeting.transcript.removeAll { $0.audioFile == file }
-                meeting.transcript += tagged
-                meeting.transcript.sort { $0.seconds < $1.seconds }
-            }
+            self.transcriptUpdates.submit(id: id, file: file, lines: tagged, store: store)
         }
         run(id: id, store: store, cancel: false) {
             self.state("starting", "Starting microphone…", id: id, store: store)
@@ -68,6 +71,7 @@ import AVFoundation
         run(id: id, store: store, cancel: false) {
             self.state("saving", "Saving recording…", id: id, store: store)
             _ = await recorder.stop()
+            self.transcriptUpdates.flush(store: store)
             recorder.onLiveText = nil
             store.update(id) {
                 $0.audioDiagnostics = recorder.diagnostics
@@ -100,6 +104,7 @@ import AVFoundation
     func cancel() { if canCancel { work?.cancel() } }
     func prepareForQuit(store: Store, recorder: Recorder) {
         work?.cancel()
+        transcriptUpdates.flush(store: store)
         recorder.onLiveText = nil
         for id in Set([activeID, recorder.meetingID].compactMap { $0 }) {
             store.update(id) {
@@ -171,30 +176,30 @@ import AVFoundation
         }
         if !generateNotes {
             state("ready", "Recording and transcript saved", id: id, store: store)
-            if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await NotionSync.shared.sync(id: id, store: store) } }
+            if meeting.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) { Task { await NotionSync.shared.sync(id: id, store: store) } }
             return
         }
         let usingApple = NotesAIProvider.selected == .apple
         if !usingApple && !UserDefaults.standard.bool(forKey: "openRouterEnabled") {
             state("needsKey", "Recording and transcript saved. Connect AI if you’d like a summary.", id: id, store: store)
-            if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await NotionSync.shared.sync(id: id, store: store) } }
+            if meeting.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) { Task { await NotionSync.shared.sync(id: id, store: store) } }
             return
         }
         let key = usingApple ? "" : try CloudKey.read()
         if !usingApple && key.isEmpty {
             state("needsKey", "Recording and transcript saved. Add your AI key for a summary.", id: id, store: store)
-            if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await NotionSync.shared.sync(id: id, store: store) } }
+            if meeting.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) { Task { await NotionSync.shared.sync(id: id, store: store) } }
             return
         }
         state("generating", "Writing your notes…", id: id, store: store)
         let source = ["USER NOTES:\n" + meeting.notes, "TRANSCRIPT:\n" + meeting.transcriptText].filter { !$0.isEmpty }.joined(separator: "\n\n")
         let result: SummaryResult
-        if usingApple { result = try await AppleNotesAI.summarize(source, length: meeting.notesLength ?? .complete, progress: { text in self.message = text; store.progress = text }) }
-        else { result = try await AIClient(apiKey: key).summarize(source, length: meeting.notesLength ?? .complete, progress: { text in self.message = text; store.progress = text }) }
+        if usingApple { result = try await AppleNotesAI.summarize(source, length: meeting.notesLength ?? .complete, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }) }
+        else { result = try await AIClient(apiKey: key).summarize(source, length: meeting.notesLength ?? .complete, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }) }
         try Task.checkCancellation()
         store.update(id) { $0.apply(result, originalTitle: meeting.title) }
         stage = "ready"; message = "Notes ready"
-        if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await NotionSync.shared.sync(id: id, store: store) } }
+        if meeting.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) { Task { await NotionSync.shared.sync(id: id, store: store) } }
     }
     static func group(_ file: String) -> String {
         if file.hasSuffix("-mic.m4a") { return String(file.dropLast(8)) }

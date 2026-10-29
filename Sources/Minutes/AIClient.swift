@@ -3,7 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
-struct AIClient {
+struct AIClient: Sendable {
     static let defaultModel = "openrouter/free"
     static let endpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     let apiKey: String
@@ -52,14 +52,17 @@ struct AIClient {
     }
     private func generate(system: String, text: String) async throws -> SummaryResult {
         let request = try Self.request(key: apiKey, system: system, text: text)
-        // Retry only transient server failures, once. Do not retry auth or rate limits.
+        // Retry a transient server or rate-limit response once, honoring a bounded Retry-After. Never retry auth failures.
         for attempt in 0...1 {
             try Task.checkCancellation()
             let data: Data; let response: URLResponse
             do { (data, response) = try await session.data(for: request) }
             catch { if Task.isCancelled { throw CancellationError() }; throw AppFailure("Could not reach OpenRouter. Check your connection, then retry. Your transcript is saved.") }
             guard let http = response as? HTTPURLResponse else { throw AppFailure("No response from OpenRouter.") }
-            if attempt == 0, [502, 503, 504].contains(http.statusCode) { try await Task.sleep(nanoseconds: 2_000_000_000); continue }
+            if attempt == 0, [429, 502, 503, 504].contains(http.statusCode) {
+                let delay = min(30, max(2, Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? (http.statusCode == 429 ? 5 : 2)))
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)); continue
+            }
             return try Self.decode(data, status: http.statusCode)
         }
         throw AppFailure("OpenRouter is unavailable. Try again shortly.")
@@ -78,17 +81,15 @@ struct AIClient {
         if !rest.isEmpty { chunks.append(String(rest)) }
         return chunks
     }
-    func summarize(_ source: String, length: NotesLength = .complete, progress: @escaping @MainActor (String) -> Void) async throws -> SummaryResult {
+    func summarize(_ source: String, length: NotesLength = .complete, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void) async throws -> SummaryResult {
         guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AppFailure("No speech was found. You can listen to the saved recording.") }
         let system = NotesLength.basePrompt + "\n" + length.instruction
-        // Bounded inputs leave space for a detailed answer. Never recursively
-        // summarize generated notes: doing that discarded lecture detail.
-        let parts = Self.chunks(source, limit: length == .complete ? 7000 : 10000)
-        var sections: [SummaryResult] = []
-        for (index, part) in parts.enumerated() {
-            try Task.checkCancellation()
-            await progress("Writing " + length.title.lowercased() + " notes · \(index + 1) of \(parts.count)")
-            sections.append(try await generate(system: system, text: "<source section=\"\(index + 1)\" total=\"\(parts.count)\">\n\(part)\n</source>"))
+        // Larger text batches plus bounded parallel requests. No source cap and
+        // no recursive compression of finished notes.
+        let parts = Self.chunks(source, limit: 12000)
+        await progress("Writing your notes…")
+        let sections = try await OrderedBatch.map(Array(parts.enumerated()), concurrency: 3, progress: fraction) { item in
+            try await generate(system: system, text: "<source section=\"\(item.offset + 1)\" total=\"\(parts.count)\">\n\(item.element)\n</source>")
         }
         return NotesLength.combine(sections)
     }

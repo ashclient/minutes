@@ -77,6 +77,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             }
         }
         .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("--preview-progress"), let id = store.selectedID { pipeline.showProgressPreview(id: id) }
             if ProcessInfo.processInfo.arguments.contains("--preview-calendar") { showCalendar = true }
             if ProcessInfo.processInfo.arguments.contains("--preview-finish") || ProcessInfo.processInfo.arguments.contains("--preview-delivery"), let id = store.selectedID { pipeline.finishID = id }
             if ProcessInfo.processInfo.arguments.contains("--preview-connections") || (ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-notion-destination")) || ProcessInfo.processInfo.arguments.contains("--preview-google") { openSettings("Connections") }
@@ -174,7 +175,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 }.font(.system(size: 11)).foregroundStyle(.secondary)
             }
             if recordingSelected { Label("Recording this meeting. You can keep writing below.", systemImage: "record.circle").font(.system(size: 12)).foregroundStyle(.secondary) }
-            if processingSelected { HStack { ProgressView().controlSize(.small); Text(pipeline.message).font(.system(size: 12)).foregroundStyle(.secondary) } }
+            if processingSelected { Text(pipeline.message).font(.system(size: 12)).foregroundStyle(.secondary) }
             VStack(alignment: .leading, spacing: 10) {
                 Text("Your notes").font(.system(size: 13, weight: .semibold))
                 ZStack(alignment: .topLeading) {
@@ -191,12 +192,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary)
                 NoteDocument(text: note.finishedNotes).equatable()
             }
-            if !note.audioFiles.isEmpty { recordings(note) }
-            if !note.transcript.isEmpty || recordingSelected {
-                DisclosureGroup("Transcript", isExpanded: $transcriptOpen) {
-                    if transcriptOpen { TranscriptListView(lines: note.transcript) }
-                }.font(.system(size: 12, weight: .medium)).id("transcript-section")
-            }
+            if !note.audioFiles.isEmpty || !note.transcript.isEmpty || recordingSelected { sourceCard(note) }
             if !protected(note.id) { recovery(note) }
             if let error = note.notionError { HStack(alignment: .top) { Text(error).font(.caption).foregroundStyle(.secondary); Spacer(); Button("Retry Notion") { sync(note.id) }.font(.caption) } }
             if note.notionSyncEnabled == false { Text("Notion sync is off for this meeting.").font(.system(size: 10)).foregroundStyle(.tertiary) }
@@ -204,15 +200,33 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             else if let date = note.notionSyncedAt { Text("Saved to Notion · " + date.formatted(date: .omitted, time: .shortened)).font(.system(size: 10)).foregroundStyle(.tertiary) }
         }.padding(.horizontal, 40).padding(.top, 28).padding(.bottom, 48).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .center)
     }
-    private func recordings(_ note: Meeting) -> some View {
-        DisclosureGroup(isExpanded: $recordingsOpen) {
-            VStack(spacing: 0) {
-                ForEach(Array(note.audioFiles.enumerated()), id: \.element) { index, file in
-                    if recordingSelected || (processingSelected && note.pipelineStatus == "saving") { HStack { Label(RecordingTrack.source(file), systemImage: "waveform"); Spacer(); Text("Recording in progress").foregroundStyle(.secondary) }.font(.caption).padding(.vertical, 10) }
-                    else if let url = store.audioURL(file) { RecordingPlayer(url: url, name: RecordingTrack.source(file) == "Recording" ? "Recording \(index + 1)" : RecordingTrack.source(file)).id(file) }
+    private func sourceCard(_ note: Meeting) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 20) {
+                if !note.audioFiles.isEmpty {
+                    Button { recordingsOpen.toggle(); if recordingsOpen { transcriptOpen = false } } label: {
+                        HStack(spacing: 7) { Image(systemName: recordingsOpen ? "chevron.down" : "chevron.right").font(.system(size: 9)); Image(systemName: "waveform"); Text("Recordings"); Text("\(note.audioFiles.count)").foregroundStyle(.tertiary) }
+                    }.accessibilityLabel(recordingsOpen ? "Hide recordings" : "Show recordings")
                 }
-            }.padding(.top, 8)
-        } label: { HStack(spacing: 8) { Image(systemName: "waveform"); Text(recordingSelected ? "Recording this meeting" : "Recordings"); Spacer(); Text("\(note.audioFiles.count) \(note.audioFiles.count == 1 ? "track" : "tracks")").foregroundStyle(.tertiary) }.font(.system(size: 12)) }.padding(.horizontal, 14).padding(.vertical, 12).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+                if !note.transcript.isEmpty || recordingSelected {
+                    Button { transcriptOpen.toggle(); if transcriptOpen { recordingsOpen = false } } label: {
+                        HStack(spacing: 7) { Image(systemName: transcriptOpen ? "chevron.down" : "chevron.right").font(.system(size: 9)); Image(systemName: "text.alignleft"); Text("Transcript") }
+                    }.accessibilityLabel(transcriptOpen ? "Hide transcript" : "Show transcript")
+                }
+                Spacer(minLength: 0)
+            }.buttonStyle(.plain).font(.system(size: 12, weight: .medium)).padding(.vertical, 12)
+            if recordingsOpen {
+                Divider()
+                ForEach(Array(note.audioFiles.enumerated()), id: \.element) { index, file in
+                    if recordingSelected || (processingSelected && note.pipelineStatus == "saving") {
+                        HStack { Label(RecordingTrack.source(file), systemImage: "waveform"); Spacer(); Text("Recording in progress").foregroundStyle(.secondary) }.font(.caption).padding(.vertical, 10)
+                    } else if let url = store.audioURL(file) {
+                        RecordingPlayer(url: url, name: RecordingTrack.source(file) == "Recording" ? "Recording \(index + 1)" : RecordingTrack.source(file)).id(file)
+                    }
+                }
+            }
+            if transcriptOpen { Divider(); TranscriptListView(lines: note.transcript).padding(.bottom, 14) }
+        }.padding(.horizontal, 14).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10)).id("transcript-section")
     }
     private var welcome: some View {
         VStack(spacing: 14) {
@@ -230,7 +244,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 RecordingControls()
                 if let failure = recorder.failure { Text(failure).font(.caption).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading) }
             } else if pipeline.working {
-                HStack { ProgressView().controlSize(.small); Text(pipeline.message).font(.system(size: 12)).foregroundStyle(.secondary); Spacer(); if pipeline.activeID != store.selectedID { Button("View note") { store.selectedID = pipeline.activeID }.font(.caption) }; if pipeline.cancellable { Button("Cancel") { pipeline.cancel() }.font(.caption) } }
+                HStack(spacing: 16) { ProcessingProgressView(message: pipeline.message, fraction: pipeline.progressFraction); if pipeline.activeID != store.selectedID { Button("View note") { store.selectedID = pipeline.activeID }.font(.caption) }; if pipeline.cancellable { Button("Cancel") { pipeline.cancel() }.font(.caption) } }
             } else {
                 HStack(spacing: 12) {
                     Menu { Toggle("Include computer audio", isOn: $includeComputer); Divider(); Button("Import audio…", action: importAudio); Button("Import notes…") { store.importText() } } label: { Label(includeComputer ? "Mic + computer" : "Microphone", systemImage: includeComputer ? "speaker.wave.2" : "mic").font(.system(size: 11)) }.menuStyle(.borderlessButton).fixedSize().foregroundStyle(.secondary)

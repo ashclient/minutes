@@ -56,17 +56,19 @@ enum AppleTextBudget {
     @Guide(description: "Only explicit next steps, preserving stated owners or deadlines; empty when none") var actions: [String]
 }
 @MainActor enum AppleNotesAI {
-    static func summarize(_ source: String, length: NotesLength = .complete, progress: @escaping @MainActor (String) -> Void) async throws -> SummaryResult {
+    static func summarize(_ source: String, length: NotesLength = .complete, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void) async throws -> SummaryResult {
         let availability = AppleAIAvailability.current
         guard availability.available else { throw AppFailure(availability.message) }
         guard #available(macOS 27.0, *) else { throw AppFailure("Experimental Apple Intelligence requires macOS 27 or newer.") }
         let parts = AppleTextBudget.chunks(source, bytes: 1800)
         guard !parts.isEmpty else { throw AppFailure("Add notes or a transcript before making notes.") }
+        fraction(0)
         var notes: [SummaryResult] = []
         for (index, text) in parts.enumerated() {
             try Task.checkCancellation()
-            progress("Apple Intelligence · section \(index + 1) of \(parts.count)")
+            progress("Writing notes with Apple Intelligence…")
             notes.append(try await generate(text, length: length))
+            fraction(Double(index + 1) / Double(parts.count))
         }
         return NotesLength.combine(notes)
     }
