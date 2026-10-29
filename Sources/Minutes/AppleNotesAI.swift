@@ -50,31 +50,57 @@ enum AppleTextBudget {
 
 @MainActor enum AppleNotesAI {
     private static var completedSections: [String: String] = [:]
-    static func summarize(_ source: String, length: NotesLength = .complete, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void, partial: @escaping @MainActor (String) -> Void = { _ in }) async throws -> SummaryResult {
+    static func summarize(_ source: String, length: NotesLength = .complete, format: StudyFormat = .outline, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void, partial: @escaping @MainActor (String) -> Void = { _ in }) async throws -> SummaryResult {
         let availability = AppleAIAvailability.current
         guard availability.available else { throw AppFailure(availability.message) }
         guard #available(macOS 27.0, *) else { throw AppFailure("Apple Intelligence requires macOS 27 or newer.") }
         let parts = AppleTextBudget.chunks(source, bytes: 2400)
         guard !parts.isEmpty else { throw AppFailure("Add notes or a transcript first.") }
-        let draft = LectureDraft(partial: partial)
-        progress("Writing lecture notes…")
-        let notes = try await OrderedBatch.map(Array(parts.enumerated()), concurrency: 2, progress: fraction) { item in
-            try await generate(item.element, length: length) { text in draft.update(index: item.offset, text: text) }
+        progress("Reading and selecting key concepts…")
+        var notes: [String] = []
+        for (index, text) in parts.enumerated() {
+            try Task.checkCancellation()
+            let purpose = "Extract only source-supported concepts in at most \(StudyBudget.evidenceWords(length)) words. Do not create coursework, numeric examples or definitions absent from this source. Omit unclear or incomplete examples rather than filling gaps."
+            let output = try await generate(text, instruction: purpose + " " + format.instruction, tokens: length == .brief ? 130 : length == .detailed ? 250 : 550, key: length.rawValue + format.rawValue, partial: { value in
+                if length == .complete { partial(LectureNotes.organize(notes + [value])) }
+            })
+            notes.append(output)
+            fraction(Double(index + 1) / Double(parts.count) * (length == .complete ? 1 : 0.65))
         }
-        return SummaryResult(summary: LectureNotes.organize(notes), decisions: [], actions: [])
+        if length == .complete { return SummaryResult(summary: LectureNotes.organize(notes), decisions: [], actions: []) }
+        // The final request represents the entire lecture, not one source chunk.
+        // Reduce evidence recursively within Apple's small session context.
+        var evidence = notes.joined(separator: "\n")
+        progress("Combining topics for the whole lecture…")
+        for _ in 0..<8 {
+            let groups = AppleTextBudget.chunks(evidence, bytes: 2400)
+            if groups.count <= 1 { break }
+            var condensed: [String] = []
+            for group in groups {
+                condensed.append(try await generate(group, instruction: "Consolidate these source extracts into at most 60 words of key concepts. Merge repeats. Retain the essential rules. Do not add examples, facts or assignments.", tokens: 150, key: "reduce", partial: { _ in }))
+            }
+            let next = condensed.joined(separator: "\n")
+            guard next.utf8.count < evidence.utf8.count else { throw AppFailure("Apple could not condense this lecture safely. Retry; your previous notes are kept.") }
+            evidence = next
+        }
+        guard evidence.utf8.count <= 2400 else { throw AppFailure("Apple could not fit the selected concepts into its context. Your transcript and previous notes are saved.") }
+        fraction(0.85); progress("Writing your study notes…")
+        let final = try await generate(evidence, instruction: length.instruction + " " + format.instruction + " This source represents the ENTIRE lecture. Combine topics; no section-by-section recap. No invented coursework or examples.", tokens: length == .brief ? 550 : 1500, key: "final-" + length.rawValue + format.rawValue, partial: { partial(StudyBudget.limit($0, words: StudyBudget.maximum(length))) })
+        fraction(1)
+        return SummaryResult(summary: StudyBudget.limit(final, words: StudyBudget.maximum(length)), decisions: [], actions: [])
     }
     @available(macOS 26.0, *)
-    private static func generate(_ text: String, length: NotesLength, partial: @escaping @MainActor (String) -> Void) async throws -> String {
-        let key = "lecture-v3:" + length.rawValue + "\n" + text
+    private static func generate(_ text: String, instruction: String, tokens: Int, key cacheTag: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
+        let key = "lecture-v4:" + cacheTag + instruction + "\n" + text
         if let saved = completedSections[key] { partial(saved); return saved }
         // Plain-text streaming avoids schema parsing failures and their full retries.
         let attempt = await AsyncDeadline.run(seconds: 120) {
-            let session = LanguageModelSession(instructions: LectureNotes.instruction + "\n" + length.instruction)
+            let session = LanguageModelSession(instructions: LectureNotes.instruction + "\n" + instruction)
             var output = ""; var last = Date.distantPast
-            for try await snapshot in session.streamResponse(to: "<source>\n" + text + "\n</source>", options: GenerationOptions(temperature: 0.2, maximumResponseTokens: 1600)) {
+            for try await snapshot in session.streamResponse(to: "<source>\n" + text + "\n</source>", options: GenerationOptions(sampling: .greedy, maximumResponseTokens: tokens)) {
                 try Task.checkCancellation()
                 output = snapshot.content
-                if Date().timeIntervalSince(last) > 0.25 { partial(output); last = Date() }
+                if Date().timeIntervalSince(last) > 0.7 { partial(output); last = Date() }
             }
             try Task.checkCancellation(); partial(output)
             return output.trimmingCharacters(in: .whitespacesAndNewlines)

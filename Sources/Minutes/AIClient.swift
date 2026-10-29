@@ -81,9 +81,9 @@ struct AIClient: Sendable {
         if !rest.isEmpty { chunks.append(String(rest)) }
         return chunks
     }
-    func summarize(_ source: String, length: NotesLength = .complete, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void) async throws -> SummaryResult {
+    func summarize(_ source: String, length: NotesLength = .complete, format: StudyFormat = .outline, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void) async throws -> SummaryResult {
         guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AppFailure("No speech was found. You can listen to the saved recording.") }
-        let system = NotesLength.basePrompt + "\n" + length.instruction
+        let system = NotesLength.basePrompt + "\n" + length.instruction + "\n" + format.instruction
         // Each worker drafts then verifies its own section; a slow draft no longer
         // blocks reviews of every other section. Bound total network requests to four.
         let parts = Self.chunks(source, limit: 18000)
@@ -95,6 +95,9 @@ struct AIClient: Sendable {
             return try await generate(system: system + "\n" + NotesLength.reviewPrompt,
                 text: "PREVIOUS SECTION (context only, do not repeat):\n" + previous + "\nORIGINAL SOURCE FOR THIS SECTION:\n" + item.element + "\nDRAFT TO CHECK:\n" + String(decoding: draft, as: UTF8.self))
         }
-        return NotesLength.combine(reviewed)
+        let combined = NotesLength.combine(reviewed)
+        guard length != .complete else { return combined }
+        let final = try await generate(system: system + "\nConsolidate these extracts for the ENTIRE lecture. Apply the total word limit. Merge related topics; remove duplication. No invented assignments or examples.", text: combined.summary)
+        return SummaryResult(title: combined.title, summary: StudyBudget.limit(final.summary, words: StudyBudget.maximum(length)), decisions: final.decisions, actions: final.actions)
     }
 }

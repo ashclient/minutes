@@ -3,6 +3,23 @@ import Foundation
 // Convert presentation into native Notion blocks; never send Markdown as one quote.
 enum NotionMarkdown {
     static func rich(_ text: String) -> [[String: Any]] {
+        let pattern = #"\\\((.+?)\\\)|\$\$(.+?)\$\$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return plainRich(text) }
+        let source = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: source.length))
+        if matches.isEmpty { return plainRich(NoteMath.readable(text)) }
+        var output: [[String: Any]] = []; var cursor = 0
+        for match in matches {
+            output += plainRich(source.substring(with: NSRange(location: cursor, length: match.range.location - cursor)))
+            let range = match.range(at: 1).location != NSNotFound ? match.range(at: 1) : match.range(at: 2)
+            let expression = source.substring(with: range)
+            if expression.count <= 1000 { output.append(["type": "equation", "equation": ["expression": expression]]) }
+            else { output += plainRich(NoteMath.readable(expression)) }
+            cursor = match.range.location + match.range.length
+        }
+        output += plainRich(source.substring(from: cursor)); return output
+    }
+    private static func plainRich(_ text: String) -> [[String: Any]] {
         guard let value = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) else { return NotionClient.rich(text) }
         var result: [[String: Any]] = []
         for run in value.runs {
@@ -18,7 +35,7 @@ enum NotionMarkdown {
         return result
     }
     static func blocks(_ markdown: String) -> [[String: Any]] {
-        let lines = markdown.components(separatedBy: .newlines)
+        let lines = NoteMath.parts(markdown)
         var result: [[String: Any]] = [], code: [String] = []
         var fenced = false
         func append(_ text: String, type: String = "paragraph", checked: Bool? = nil, literal: Bool = false) {
@@ -33,7 +50,13 @@ enum NotionMarkdown {
                 result.append(["object": "block", "type": kind, kind: payload])
             }
         }
-        for raw in lines {
+        for part in lines {
+            let raw = part.text
+            if part.equation && !fenced {
+                if part.text.count <= 1000 { result.append(["object": "block", "type": "equation", "equation": ["expression": part.text]]) }
+                else { append(NoteMath.readable(part.text)) }
+                continue
+            }
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("```") { if fenced { append(code.joined(separator: "\n"), type: "code", literal: true); code = [] }; fenced.toggle(); continue }
             if fenced { code.append(raw); continue }

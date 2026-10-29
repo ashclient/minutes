@@ -37,6 +37,7 @@ struct Meeting: Sendable, Identifiable, Codable, Equatable {
     var notionURL: String? = nil
     var notionBlockID: String? = nil
     var notionBlockIDs: [String]? = nil
+    var studyFormat: StudyFormat? = nil
     var notesLength: NotesLength? = nil
     var notionSyncedAt: Date? = nil
     var notionError: String? = nil

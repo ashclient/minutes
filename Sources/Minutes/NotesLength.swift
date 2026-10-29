@@ -5,13 +5,13 @@ enum NotesLength: String, Codable, Sendable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String { switch self { case .brief: return "Brief"; case .detailed: return "Detailed"; case .complete: return "Full detail" } }
     var explanation: String { switch self {
-    case .brief: return "A quick overview, key outcomes, and next steps."
-    case .detailed: return "Clear, thorough notes with explanations and examples."
+    case .brief: return "Main topics and essential definitions. Up to 300 words for the entire lecture."
+    case .detailed: return "Main topics, explanations, and selected examples. Up to 900 words total."
     case .complete: return "Thorough study notes: combine related ideas, retain explanations and worked examples, remove repetition."
     } }
     var instruction: String { switch self {
-    case .brief: return "The user chose BRIEF. Prioritize the main ideas and explicit outcomes. Omit incidental examples, but retain critical numbers, qualifications, and deadlines."
-    case .detailed: return "The user chose DETAILED. Capture every substantive topic with its explanation, evidence, examples, and qualifications. Do not force a word limit or collapse distinct ideas into a vague summary."
+    case .brief: return "BRIEF STUDY NOTES: the whole lecture must fit within 300 words, not 300 per section. Focus on main topics and essential definitions. Omit worked examples, repeated explanations, incidental names and generic advice."
+    case .detailed: return "MEDIUM STUDY NOTES: the whole lecture must fit within 900 words. Group main topics, explain key reasoning and include only the most useful source-supported examples. Do not transcribe every exchange."
     case .complete: return "The user chose comprehensive college study notes. Synthesize and reorganize concepts, not the speaker’s wording or sequence. Keep substantive definitions, reasoning, formulas, worked examples, exceptions and exam requirements. Combine repeated points and related explanations. Drop conversational questions, roll call, chatter, duplicate facts and obvious filler. There is no fixed word count, but every bullet must add distinct study value. Do not restate the transcript line by line."
     } }
     static func combine(_ sections: [SummaryResult]) -> SummaryResult {
@@ -30,4 +30,36 @@ enum NotesLength: String, Codable, Sendable, CaseIterable, Identifiable {
     Output only valid JSON: {"title":"short descriptive title","summary":"Markdown notes","decisions":[],"actions":[]}.
     Keep explicit decisions and concrete tasks in their arrays instead of repeating them in summary. Empty arrays are valid; include owners and deadlines only if stated. Each input may be one consecutive section of a longer recording: cover this section without inventing an introduction or conclusion for the entire recording.
     """
+}
+
+enum StudyFormat: String, Codable, CaseIterable, Identifiable, Sendable {
+    case outline = "Outline", cornell = "Cornell", questions = "Q&A"
+    var id: String { rawValue }
+    var instruction: String {
+        switch self {
+        case .outline: return "Use topic headings and concise explanatory bullets."
+        case .cornell: return "Use topic headings, then bold Cue: and Notes: labels for each major concept. End with one brief synthesis. Do not use a table."
+        case .questions: return "Use topic headings and bold study questions followed by concise answers. Questions are revision prompts, not assigned homework."
+        }
+    }
+}
+enum StudyBudget {
+    static func words(_ text: String) -> Int { text.split(whereSeparator: \.isWhitespace).count }
+    static func maximum(_ length: NotesLength) -> Int { switch length { case .brief: return 300; case .detailed: return 900; case .complete: return Int.max } }
+    static func evidenceWords(_ length: NotesLength) -> Int { switch length { case .brief: return 45; case .detailed: return 90; case .complete: return 180 } }
+    // Whole-document guard. Preserve complete lines; never split a formula block.
+    static func limit(_ text: String, words maximum: Int) -> String {
+        guard words(text) > maximum else { return text }
+        var output: [String] = [], count = 0, group: [String] = [], math = false
+        for line in text.components(separatedBy: "\n") {
+            if line.trimmingCharacters(in: .whitespaces) == "$$" || line.trimmingCharacters(in: .whitespaces) == "\\[" || line.trimmingCharacters(in: .whitespaces) == "\\]" {
+                group.append(line); math.toggle(); if math { continue }
+            } else { group.append(line); if math { continue } }
+            let cost = words(group.joined(separator: " "))
+            if count + cost <= maximum { output += group; count += cost }
+            group = []
+        }
+        while let last = output.last, last.isEmpty || last.hasPrefix("#") { output.removeLast() }
+        return output.joined(separator: "\n")
+    }
 }

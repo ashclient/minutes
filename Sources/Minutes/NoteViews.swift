@@ -5,8 +5,11 @@ struct NoteDocument: View, Equatable {
     let text: String
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 7) {
-            ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
-                if line.hasPrefix("#") {
+            ForEach(NoteMath.parts(text)) { part in
+                let line = NoteMath.readable(part.text)
+                if part.equation {
+                    Text(NoteMath.readable(line)).font(.system(size: 14, design: .serif)).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading).padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7)).textSelection(.enabled)
+                } else if line.hasPrefix("#") {
                     Text(line.drop(while: { $0 == "#" || $0 == " " })).font(.system(size: 15, weight: .semibold)).padding(.top, 10)
                 } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
                     HStack(alignment: .top, spacing: 8) { Text("•").foregroundStyle(.secondary); Text(.init(String(line.dropFirst(2)))).frame(maxWidth: .infinity, alignment: .leading) }

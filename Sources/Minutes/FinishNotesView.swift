@@ -6,6 +6,7 @@ import SwiftUI
     @EnvironmentObject var store: Store
     let id: UUID
     @State private var length: NotesLength = .complete
+    @State private var format: StudyFormat = .outline
     @State private var step = 0
     @State private var transcriptOnly = false
     @State private var mode: NotionDeliveryMode = .local
@@ -19,6 +20,7 @@ import SwiftUI
             HStack { Text(step == 0 ? "How much detail would you like?" : "Where should the notes go?").font(.title2).fontWeight(.semibold); Spacer(); Text("\(step + 1) of 2").font(.caption).foregroundStyle(.secondary) }
             if step == 0 {
                 Text("Your recording is saved. Choose the notes you want to make from it.").foregroundStyle(.secondary)
+                Picker("Format", selection: $format) { ForEach(StudyFormat.allCases) { Text($0.rawValue).tag($0) } }
                 ForEach(NotesLength.allCases) { option in
                     Button { length = option } label: {
                         HStack(alignment: .top, spacing: 12) {
@@ -52,6 +54,7 @@ import SwiftUI
                 HStack { Button("Back") { step = 0 }; Spacer(); Button(working ? "Checking page…" : transcriptOnly ? "Save transcript" : "Make notes") { Task { await finish() } }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(working || pipeline.working || (mode == .existing && selectedPage == nil)) }
             }
         }.padding(26).frame(width: 490).onAppear {
+            format = meeting?.studyFormat ?? .outline
             length = meeting?.notesLength ?? .complete
             mode = connected ? (meeting?.notionPageID == nil ? .newPage : .linked) : .local
             if ProcessInfo.processInfo.arguments.contains("--preview-delivery") { step = 1; mode = .existing }
@@ -66,7 +69,7 @@ import SwiftUI
                 let object = try await NotionClient(token: CloudKey.read(service: "notion")).call("pages/" + selectedPage.id)
                 guard let verified = NotionPageChoice.parse(object) else { throw AppFailure("That page is unavailable. Choose another page.") }; page = verified
             }
-            store.update(id) { NotionDelivery.apply(mode: mode, page: page, to: &$0) }
+            store.update(id) { $0.studyFormat = format; NotionDelivery.apply(mode: mode, page: page, to: &$0) }
             pipeline.finish(id: id, length: length, transcriptOnly: transcriptOnly, store: store, recorder: recorder)
         } catch { message = error.localizedDescription }
     }
