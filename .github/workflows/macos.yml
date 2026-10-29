@@ -27,7 +27,7 @@ jobs:
         continue-on-error: true
         run: |
           python3 Checks/preview_fixture.py
-          for mode in connections settings notion google calendar finish recorder recorder-collapsed notion-destination recorder-docked delivery transcript progress progress-background; do
+          for mode in connections settings settings-nvidia notion google calendar finish recorder recorder-collapsed notion-destination recorder-docked delivery transcript progress progress-background; do
             if [ "$mode" = transcript ]; then python3 Checks/preview_fixture.py --long-transcript; fi
             open dist/Minutes.app --args "--preview-$mode"
             sleep 3

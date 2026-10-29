@@ -4,6 +4,9 @@ import FoundationModels
 enum NotesAIProvider: String {
     case openRouter = "openrouter"
     case apple = "apple"
+    case nvidia
+    var cloud: CloudAIProvider? { self == .apple ? nil : self == .nvidia ? .nvidia : .openRouter }
+    @MainActor var configured: Bool { cloud.map { UserDefaults.standard.bool(forKey: $0.enabledKey) } ?? AppleAIAvailability.current.available }
     static var selected: Self { Self(rawValue: UserDefaults.standard.string(forKey: "notesAIProvider") ?? "openrouter") ?? .openRouter }
 }
 struct AppleAIAvailability: Equatable {

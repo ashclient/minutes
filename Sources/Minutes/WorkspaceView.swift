@@ -52,7 +52,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             if let id = pipeline.finishID { FinishNotesView(id: id).environmentObject(store).environmentObject(recorder).environmentObject(pipeline).interactiveDismissDisabled() }
         }
         .sheet(item: $setup, onDismiss: {
-            if (UserDefaults.standard.bool(forKey: "openRouterEnabled") || (NotesAIProvider.selected == .apple && AppleAIAvailability.current.available)), let meeting, meeting.pipelineStatus == "needsKey", processingAvailable { pipeline.resume(id: meeting.id, store: store, recorder: recorder) }
+            if NotesAIProvider.selected.configured, let meeting, meeting.pipelineStatus == "needsKey", processingAvailable { pipeline.resume(id: meeting.id, store: store, recorder: recorder) }
         }) { route in AppSettingsView(initialTab: route.tab).environmentObject(calendar) }
         .sheet(isPresented: Binding(get: { detailsID != nil }, set: { if !$0 { detailsID = nil } })) {
             if let id = detailsID { DetailsView(id: id).environmentObject(store).environmentObject(recorder).environmentObject(pipeline) }
@@ -89,7 +89,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             if ProcessInfo.processInfo.arguments.contains("--preview-calendar") { showCalendar = true }
             if ProcessInfo.processInfo.arguments.contains("--preview-finish") || ProcessInfo.processInfo.arguments.contains("--preview-delivery"), let id = store.selectedID { pipeline.finishID = id }
             if ProcessInfo.processInfo.arguments.contains("--preview-connections") || (ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-notion-destination")) || ProcessInfo.processInfo.arguments.contains("--preview-google") { openSettings("Connections") }
-            if ProcessInfo.processInfo.arguments.contains("--preview-settings") { openSettings("General") }
+            if ProcessInfo.processInfo.arguments.contains("--preview-settings") || ProcessInfo.processInfo.arguments.contains("--preview-settings-nvidia") { openSettings("General") }
             if UserDefaults.standard.bool(forKey: "notionEnabled") {
                 for note in store.meetings where !note.trashed && note.notionNeedsSync == true && note.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) && note.pipelineStatus != "awaitingNotes" && (note.notionPageID != nil || note.calendarEventKey != nil) {
                     Task { await notion.sync(id: note.id, store: store) }

@@ -1,4 +1,4 @@
-# Minutes 2.5.3
+# Minutes 2.6.0
 
 Native macOS meeting and lecture notes with Apple transcription, optional Apple Intelligence or OpenRouter, Google Calendar and Notion. Runs on macOS 14+; modern Apple speech needs macOS 26 on eligible hardware. Experimental Apple Intelligence generation currently requires macOS 27 and a ready system model.
 
@@ -35,3 +35,5 @@ Audio stays in `~/Library/Application Support/Minutes/Audio`; copy the entire Mi
 Build on a Mac with `bash build.command`. `MINUTES_RUN_TESTS=1` requires full Xcode. `MINUTES_UNIVERSAL=1` builds Apple Silicon and Intel, including the update helper. CI runs tests, verifies signatures/architectures, exercises the real helper against disposable app copies, and captures native UI previews. Live microphone/system-audio performance, Apple model quality/speed and account workflows still require real hardware/account testing.
 
 Keychain access: Google status checks read metadata without requesting credential bytes. Successful credential reads are shared in process memory, including concurrent requests; refreshed or disconnected credentials update that cache after a successful Keychain write. Denied reads briefly suppress duplicate requests. Secrets remain in Keychain between launches. Ad-hoc release signatures can still require renewed authorization after an update; consistent certificate-based signing is needed for identity continuity.
+
+NVIDIA API is available in General settings alongside Apple Intelligence and OpenRouter. Its default model is `nvidia/nemotron-3.5-lightning-30b-a3b`, using NVIDIA’s hosted endpoint directly, with thinking disabled for note writing. Paste a NVIDIA API key; Connect validates it using a small synthetic connection test before saving it to the separate `nvidia` Keychain item. No audio is uploaded. NVIDIA account limits apply; there is no automatic fallback to another service. NVIDIA reads up to 180,000 characters per source chunk (OpenRouter: 18,000), with at most two concurrent NVIDIA requests. Cloud replies accept supported JSON shapes or usable Markdown; an unreadable reply gets one explicit Markdown retry. Actual provider quality and access require a user API key.

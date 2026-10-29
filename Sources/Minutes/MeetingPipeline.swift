@@ -188,13 +188,15 @@ import AVFoundation
             if meeting.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) { Task { await NotionSync.shared.sync(id: id, store: store) } }
             return
         }
-        let usingApple = NotesAIProvider.selected == .apple
-        if !usingApple && !UserDefaults.standard.bool(forKey: "openRouterEnabled") {
+        let selectedProvider = NotesAIProvider.selected
+        let usingApple = selectedProvider == .apple
+        let cloud = selectedProvider.cloud ?? .openRouter
+        if !usingApple && !UserDefaults.standard.bool(forKey: cloud.enabledKey) {
             state("needsKey", "Recording and transcript saved. Connect AI if you’d like a summary.", id: id, store: store)
             if meeting.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) { Task { await NotionSync.shared.sync(id: id, store: store) } }
             return
         }
-        let key = usingApple ? "" : try CloudKey.read()
+        let key = usingApple ? "" : try CloudKey.read(service: cloud.service)
         if !usingApple && key.isEmpty {
             state("needsKey", "Recording and transcript saved. Add your AI key for a summary.", id: id, store: store)
             if meeting.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) { Task { await NotionSync.shared.sync(id: id, store: store) } }
@@ -204,7 +206,7 @@ import AVFoundation
         let source = ["NOTE TITLE (context only, not evidence of lecture content):\n" + meeting.title, "USER NOTES:\n" + meeting.notes, "TRANSCRIPT:\n" + meeting.transcriptText].filter { !$0.isEmpty }.joined(separator: "\n\n")
         let result: SummaryResult
         if usingApple { result = try await AppleNotesAI.summarize(source, length: meeting.notesLength ?? .complete, format: meeting.studyFormat ?? .outline, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }, partial: { if !Task.isCancelled && self.activeID == id && self.stage == "generating" { self.liveDraft = $0 } }) }
-        else { result = try await AIClient(apiKey: key).summarize(source, length: meeting.notesLength ?? .complete, format: meeting.studyFormat ?? .outline, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }) }
+        else { result = try await AIClient(apiKey: key, provider: cloud).summarize(source, length: meeting.notesLength ?? .complete, format: meeting.studyFormat ?? .outline, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }) }
         try Task.checkCancellation()
         store.update(id) { $0.apply(result, originalTitle: meeting.title) }
         liveDraft = ""
