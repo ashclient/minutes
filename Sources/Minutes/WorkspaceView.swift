@@ -205,7 +205,10 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 }.font(.system(size: 11)).foregroundStyle(.secondary)
             }
             if recordingSelected { Label("Recording this meeting. You can keep writing below.", systemImage: "record.circle").font(.system(size: 12)).foregroundStyle(.secondary) }
-            if processingSelected { Text(pipeline.message).font(.system(size: 12)).foregroundStyle(.secondary) }
+            if processingSelected {
+                Text(pipeline.message).font(.system(size: 12)).foregroundStyle(.secondary)
+                if !pipeline.noteWorkers.isEmpty { NoteWorkersView(workers: pipeline.noteWorkers) }
+            }
             VStack(alignment: .leading, spacing: 10) {
                 Text("Your notes").font(.system(size: 13, weight: .semibold))
                 ZStack(alignment: .topLeading) {
@@ -216,7 +219,8 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             if pipeline.activeID == note.id && !pipeline.liveDraft.isEmpty {
                 Divider()
                 Label("Live draft · still being organized", systemImage: "pencil.line").font(.caption).foregroundStyle(.secondary)
-                StreamingNotesView(text: pipeline.liveDraft, running: pipeline.working)
+                if pipeline.noteSections.isEmpty { StreamingNotesView(text: pipeline.liveDraft, running: pipeline.working) }
+                else { CollaborativeNotesView(sections: pipeline.noteSections, running: pipeline.working) }
             }
             if !note.summary.isEmpty && !(pipeline.activeID == note.id && !pipeline.liveDraft.isEmpty) {
                 Divider()

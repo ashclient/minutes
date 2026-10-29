@@ -23,6 +23,16 @@ struct GlintProgressBar: View {
             let width = geometry.size.width * amount
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.primary.opacity(reduceTransparency ? 0.18 : 0.08))
+                if fraction == nil {
+                    if reduceMotion { Capsule().fill(Color.primary.opacity(0.45)).frame(width: geometry.size.width * 0.28) }
+                    else {
+                        TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+                            let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.8) / 1.8
+                            Capsule().fill(Color.primary.opacity(0.55)).frame(width: geometry.size.width * 0.28)
+                                .offset(x: geometry.size.width * (phase * 1.28 - 0.28))
+                        }
+                    }
+                } else {
                 Capsule().fill(Color.primary.opacity(0.7)).frame(width: width)
                     .overlay(alignment: .leading) {
                         if !reduceMotion && amount > 0 && amount < 1 {
@@ -35,7 +45,8 @@ struct GlintProgressBar: View {
                         }
                     }
                     .clipShape(Capsule())
-            }
+                }
+            }.clipShape(Capsule())
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: amount)
         }
         .frame(height: 5)

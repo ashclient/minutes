@@ -43,19 +43,3 @@ final class AppleNotesTests: XCTestCase {
         XCTAssertEqual(store.meetings.first?.notes, "We agreed to review the draft on Friday.")
     }
 }
-
-final class AppleWorkingDraftTests: XCTestCase {
-    @MainActor func testEveryLengthShowsFirstProvisionalConcept() {
-        for length in NotesLength.allCases {
-            let draft = AppleNotesAI.workingDraft([], pending: "## Core concept\n- A definition with its necessary condition.", length: length)
-            XCTAssertTrue(draft.contains("necessary condition"), length.rawValue)
-        }
-    }
-    @MainActor func testDraftKeepsCompletedTopicsAndRespectsBriefBudget() {
-        let prior = "## Prior topic\n- A meaningful definition."
-        let pending = "## Current topic\n" + (0..<400).map { "- Important concept \($0) with a necessary condition." }.joined(separator: "\n")
-        let draft = AppleNotesAI.workingDraft([prior], pending: pending, length: .brief)
-        XCTAssertTrue(draft.contains("Prior topic")); XCTAssertTrue(draft.contains("Current topic"))
-        XCTAssertLessThanOrEqual(StudyBudget.words(draft), 300)
-    }
-}

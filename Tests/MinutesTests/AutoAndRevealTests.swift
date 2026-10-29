@@ -24,7 +24,8 @@ final class AutoAndRevealTests: XCTestCase {
         XCTAssertTrue(reveal.visible.isEmpty)
         reveal.tick(); XCTAssertFalse(reveal.visible.isEmpty); XCTAssertTrue(value.hasPrefix(reveal.visible))
         for _ in 0..<100 { reveal.tick() }; XCTAssertEqual(reveal.visible, value)
-        reveal.update("Revised topic"); XCTAssertEqual(reveal.visible, "Revised topic")
+        reveal.update("Revised topic"); XCTAssertNotEqual(reveal.visible, "Revised topic")
+        for _ in 0..<150 { reveal.tick() }; XCTAssertEqual(reveal.visible, "Revised topic")
         reveal.update("Revised topic with more text", immediate: true)
         XCTAssertEqual(reveal.visible, "Revised topic with more text")
     }

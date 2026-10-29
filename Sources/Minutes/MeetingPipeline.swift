@@ -8,6 +8,8 @@ import AVFoundation
     @Published var finishID: UUID?
     @Published private(set) var progressFraction: Double?
     @Published var liveDraft = ""
+    @Published var noteWorkers: [NoteWorker] = []
+    @Published var noteSections: [LiveNoteSection] = []
     @Published var draftDecisionID: UUID?
     private var work: Task<Void, Never>?
     private var canCancel = false
@@ -22,9 +24,9 @@ import AVFoundation
     }
     private func run(id: UUID, store: Store, cancel: Bool, operation: @escaping @MainActor () async throws -> Void) {
         guard work == nil else { return }
-        liveDraft = ""; activeID = id; canCancel = cancel; store.busy = true
+        liveDraft = ""; noteWorkers = []; noteSections = []; activeID = id; canCancel = cancel; store.busy = true
         work = Task {
-            defer { store.busy = false; store.saveNow(); work = nil; canCancel = false }
+            defer { noteWorkers = []; for index in noteSections.indices { noteSections[index].worker = nil }; store.busy = false; store.saveNow(); work = nil; canCancel = false }
             do { try await operation() }
             catch {
                 let cancelled = Task.isCancelled || error is CancellationError
@@ -39,6 +41,12 @@ import AVFoundation
         guard ProcessInfo.processInfo.arguments.contains(where: { $0 == "--preview-progress" || $0 == "--preview-progress-background" }) else { return }
         activeID = id; stage = "generating"; message = "Writing your notes…"; progressFraction = 0.62
         liveDraft = "## Main concepts\n- **Recognition:** record the transaction when the stated conditions are met.\n- Combine related explanations into one useful topic.\n\n## Allocation\n- Divide the transaction price using relative standalone prices.\n- Keep formulas and essential conditions together."
+        if ProcessInfo.processInfo.arguments.contains("--preview-progress") {
+            progressFraction = nil
+            noteSections = LiveNoteSection.split(liveDraft)
+            for index in noteSections.indices { noteSections[index].worker = index + 1 }
+            noteWorkers = noteSections.enumerated().map { NoteWorker(id: $0.offset + 1, task: "Editing “" + $0.element.title + "”") }
+        }
         work = Task { try? await Task.sleep(nanoseconds: 20_000_000_000) }
     }
     func start(store: Store, recorder: Recorder) {
@@ -108,7 +116,7 @@ import AVFoundation
     func resolveDraft(keep: Bool, store: Store) {
         guard let id = draftDecisionID else { return }
         if keep && !liveDraft.isEmpty { store.update(id) { $0.summary = liveDraft; $0.actions = []; $0.pipelineStatus = "ready"; $0.pipelineError = nil } }
-        liveDraft = ""; draftDecisionID = nil; stage = "ready"; message = "Notes saved"; store.saveNow()
+        liveDraft = ""; noteSections = []; noteWorkers = []; draftDecisionID = nil; stage = "ready"; message = "Notes saved"; store.saveNow()
     }
     func cancel() { if canCancel { work?.cancel() } }
     func prepareForQuit(store: Store, recorder: Recorder) {
@@ -205,11 +213,11 @@ import AVFoundation
         state("generating", "Writing your notes…", id: id, store: store)
         let source = ["NOTE TITLE (context only, not evidence of lecture content):\n" + meeting.title, "USER NOTES:\n" + meeting.notes, "TRANSCRIPT:\n" + meeting.transcriptText].filter { !$0.isEmpty }.joined(separator: "\n\n")
         let result: SummaryResult
-        if usingApple { result = try await AppleNotesAI.summarize(source, length: meeting.notesLength ?? .complete, format: meeting.studyFormat ?? .outline, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }, partial: { if !Task.isCancelled && self.activeID == id && self.stage == "generating" { self.liveDraft = $0 } }) }
-        else { result = try await AIClient(apiKey: key, provider: cloud, model: cloud.model).summarize(source, length: meeting.notesLength ?? .complete, format: meeting.studyFormat ?? .outline, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }, partial: { if !Task.isCancelled && self.activeID == id && self.stage == "generating" { self.liveDraft = $0 } }) }
+        if usingApple { result = try await AppleNotesAI.summarize(source, length: meeting.notesLength ?? .complete, format: meeting.studyFormat ?? .outline, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }, partial: { if !Task.isCancelled && self.activeID == id && self.stage == "generating" { self.liveDraft = $0 } }, activity: { if !Task.isCancelled && self.activeID == id && self.stage == "generating" { self.noteWorkers = $0 } }, sections: { if !Task.isCancelled && self.activeID == id && self.stage == "generating" { self.noteSections = $0 } }) }
+        else { result = try await AIClient(apiKey: key, provider: cloud, model: cloud.model).summarize(source, length: meeting.notesLength ?? .complete, format: meeting.studyFormat ?? .outline, fraction: { self.progressFraction = $0 == 0 ? nil : $0 }, progress: { text in self.progressFraction = nil; self.message = text; store.progress = text }, partial: { if !Task.isCancelled && self.activeID == id && self.stage == "generating" { self.liveDraft = $0 } }) }
         try Task.checkCancellation()
         store.update(id) { $0.apply(result, originalTitle: meeting.title) }
-        liveDraft = ""
+        liveDraft = ""; noteSections = []; noteWorkers = []
         stage = "ready"; message = "Notes ready"
         if meeting.shouldSync(automatic: UserDefaults.standard.bool(forKey: "notionAutoSync")) { Task { await NotionSync.shared.sync(id: id, store: store) } }
     }

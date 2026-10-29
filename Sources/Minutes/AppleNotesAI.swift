@@ -51,56 +51,91 @@ enum AppleTextBudget {
     }
 }
 
+@MainActor protocol AppleNoteInference {
+    func generate(_ text: String, instruction: String, tokens: Int, key: String, partial: @escaping @MainActor (String) -> Void) async throws -> String
+}
+@available(macOS 26.0, *)
+@MainActor private struct SystemNoteInference: AppleNoteInference {
+    func generate(_ text: String, instruction: String, tokens: Int, key: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
+        try await AppleNotesAI.generate(text, instruction: instruction, tokens: tokens, key: key, partial: partial)
+    }
+}
 @MainActor enum AppleNotesAI {
     private static var completedSections: [String: String] = [:]
-    static func summarize(_ source: String, length: NotesLength = .complete, format: StudyFormat = .outline, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void, partial: @escaping @MainActor (String) -> Void = { _ in }) async throws -> SummaryResult {
+    static func summarize(_ source: String, length: NotesLength = .complete, format: StudyFormat = .outline, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void, partial: @escaping @MainActor (String) -> Void = { _ in }, activity: @escaping @MainActor ([NoteWorker]) -> Void = { _ in }, sections: @escaping @MainActor ([LiveNoteSection]) -> Void = { _ in }) async throws -> SummaryResult {
         let availability = AppleAIAvailability.current
         guard availability.available else { throw AppFailure(availability.message) }
         guard #available(macOS 27.0, *) else { throw AppFailure("Apple Intelligence requires macOS 27 or newer.") }
+        let configured = UserDefaults.standard.object(forKey: "appleNoteWorkers") == nil ? 2 : UserDefaults.standard.integer(forKey: "appleNoteWorkers")
+        let workers = max(1, min(4, configured))
+        let editing = UserDefaults.standard.object(forKey: "appleCollaborativeEditing") == nil || UserDefaults.standard.bool(forKey: "appleCollaborativeEditing")
+        return try await compose(source, length: length, format: format, workers: workers, editing: editing, infer: SystemNoteInference(), fraction: fraction, progress: progress, partial: partial, activity: activity, sections: sections)
+    }
+    static func compose(_ source: String, length: NotesLength, format: StudyFormat, workers: Int, editing: Bool, infer: any AppleNoteInference, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void = { _ in }, partial: @escaping @MainActor (String) -> Void = { _ in }, activity: @escaping @MainActor ([NoteWorker]) -> Void = { _ in }, sections: @escaping @MainActor ([LiveNoteSection]) -> Void = { _ in }) async throws -> SummaryResult {
         let parts = AppleTextBudget.chunks(source, bytes: 2400)
         guard !parts.isEmpty else { throw AppFailure("Add notes or a transcript first.") }
-        progress("Reading and selecting key concepts…")
-        var notes: [String] = []
-        for (index, text) in parts.enumerated() {
-            try Task.checkCancellation()
-            progress("Selecting key concepts · draft \(index + 1) of \(parts.count)…")
-            let purpose = length == .auto ? "Collect concise factual evidence for useful class notes. Keep each main concept with its meaning, necessary conditions and formula, not an isolated keyword. Retain a representative worked example only with its complete setup, labelled quantities and result; do not collect every similar exercise. Merge repetition and omit chatter or incomplete fragments. No length target. Preserve quantity roles and units exactly. Do not invent definitions, examples or assignments." : "Extract only source-supported concepts in at most \(StudyBudget.evidenceWords(length)) words. Do not create coursework, numeric examples or definitions absent from this source. Omit unclear or incomplete examples rather than filling gaps."
-            let output = try await generate(text, instruction: purpose + " " + format.instruction, tokens: length == .auto ? 450 : length == .brief ? 130 : length == .detailed ? 250 : 550, key: length.rawValue + format.rawValue, partial: { value in
-                partial(workingDraft(notes, pending: value, length: length))
-            })
-            notes.append(output)
-            fraction(Double(index + 1) / Double(parts.count) * (length == .complete ? 1 : 0.65))
+        fraction(0); progress("Reading the lecture for its main concepts…")
+        // Evidence is internal, not a growing set of per-chunk finished notes.
+        // The document is written once from the whole-lecture synthesis below.
+        let evidenceParts = try await NoteWorkerPool.map(parts, limit: workers, activity: activity,
+            completed: { done, total in fraction(Double(done) / Double(total) * 0.5); progress("Reading source · \(done) of \(total) passages checked") },
+            label: { "Reading passage \($0 + 1)" }) { _, _, text in
+            try await infer.generate(text, instruction: "Collect compact factual evidence, not finished notes. Keep the main concept with its meaning, necessary conditions, formulas and quantity roles. Merge repeated explanations. Retain at most one complete example when essential to understand the concept. No headings per utterance, transcript retelling, outside facts or invented assignments. " + (length == .brief ? "Select only the highest-priority concepts in at most 45 words." : length == .complete ? "Keep distinct meaningful concepts in at most 160 words." : "Prefer about 80 words of essential evidence; omit secondary detail."), tokens: length == .brief ? 130 : length == .complete ? 350 : 220, key: "evidence-v7-" + length.rawValue, partial: { _ in })
         }
-        if length == .complete { return SummaryResult(summary: LectureNotes.organize(notes), decisions: [], actions: []) }
-        // The final request represents the entire lecture, not one source chunk.
-        // Reduce evidence recursively within Apple's small session context.
-        var evidence = notes.joined(separator: "\n")
-        progress("Combining topics for the whole lecture…")
-        for _ in 0..<8 {
+        var evidence = evidenceParts.joined(separator: "\n")
+        progress("Combining related concepts across the lecture…")
+        for round in 0..<8 {
             let groups = AppleTextBudget.chunks(evidence, bytes: 2400)
             if groups.count <= 1 { break }
-            var condensed: [String] = []
-            for group in groups {
-                condensed.append(try await generate(group, instruction: length == .auto ? "Consolidate these extracts into a compact factual concept inventory for the entire lecture. Merge synonymous topics and repeated explanations. Keep the meaning of each main concept with its essential conditions and formula; never reduce a definition to its name alone. Retain a selected example as one compact unit: setup, quantities and result. Remove secondary examples before stripping the meaning from a rule. No expanded teaching prose or section-by-section recap. Do not invent content. The next pass will write the notes." : "Consolidate these source extracts into at most 60 words of key concepts. Merge repeats. Retain the essential rules. Do not add examples, facts or assignments.", tokens: length == .auto ? 280 : 150, key: "reduce-" + length.rawValue, partial: { _ in }))
+            let reduced = try await NoteWorkerPool.map(groups, limit: workers, activity: activity,
+                label: { "Merging related concepts · \($0 + 1)" }) { _, _, group in
+                try await infer.generate(group, instruction: "Merge these factual extracts into a compact concept inventory. Combine synonyms and repetition; preserve the meaning, essential conditions, formulas and units. Keep one representative example only if necessary and complete. Remove secondary examples and minor detail. No textbook expansion, section recap, invented facts or isolated keyword lists. Use at most 90 words.", tokens: 200, key: "reduce-v7-" + length.rawValue, partial: { _ in })
             }
-            let next = condensed.joined(separator: "\n")
-            guard next.utf8.count < evidence.utf8.count else { throw AppFailure("Apple could not condense this lecture safely. Retry; your previous notes are kept.") }
-            evidence = next
+            let next = reduced.joined(separator: "\n")
+            guard next.utf8.count < evidence.utf8.count else { throw AppFailure("Apple could not consolidate this lecture safely. Your previous notes are kept.") }
+            evidence = next; fraction(0.5 + Double(round + 1) / 8 * 0.15)
         }
         guard evidence.utf8.count <= 2400 else { throw AppFailure("Apple could not fit the selected concepts into its context. Your transcript and previous notes are saved.") }
-        fraction(0.85); progress("Writing your study notes…")
-        let final = try await generate(evidence, instruction: length.instruction + " " + format.instruction + " This source represents the ENTIRE lecture. Combine topics; no section-by-section recap. No invented coursework or examples.", tokens: length == .brief ? 550 : 1500, key: "final-" + length.rawValue + format.rawValue, partial: { partial(StudyBudget.limit($0, words: StudyBudget.maximum(length))) })
-        fraction(1)
-        return SummaryResult(summary: StudyBudget.limit(final, words: StudyBudget.maximum(length)), decisions: [], actions: [])
-    }
-    // Expose the actual provisional notes while evidence is selected; final
-    // consolidation can revise them. Saved notes remain untouched until finish.
-    static func workingDraft(_ sections: [String], pending: String, length: NotesLength) -> String {
-        StudyBudget.limit(LectureNotes.organize(sections + [pending]), words: StudyBudget.maximum(length))
+        fraction(0.65); progress("Writing one set of notes for the whole lecture…")
+        activity([NoteWorker(id: 1, task: "Writing the whole-lecture draft")])
+        let final = try await infer.generate(evidence, instruction: length.instruction + " " + format.instruction + " This source represents the ENTIRE lecture. Use a small set of distinct main topics, not one heading or note per source passage. Explain each concept once. Keep only useful, concise details. Merge repetition and synonymous topics. Do not expand brief source facts into textbook lessons or manufacture examples.", tokens: length == .brief ? 550 : length == .complete ? 1800 : 1300, key: "global-v7-" + length.rawValue + format.rawValue, partial: { partial(StudyBudget.limit($0, words: StudyBudget.maximum(length))) })
+        let initial = StudyBudget.limit(final, words: StudyBudget.maximum(length))
+        activity([]); fraction(editing ? 0.8 : 1)
+        guard editing else { return SummaryResult(summary: initial, decisions: [], actions: []) }
+        progress("Editors are refining the topics…")
+        let document = CollaborativeDraft(text: initial) { values, text in sections(values); partial(text) }
+        sections(document.sections)
+        let originals = document.sections
+        // Preserve a topic unchanged if its own text would crowd the model's
+        // context; never silently truncate the original draft to make it fit.
+        let editable = originals.indices.filter { originals[$0].text.utf8.count <= 2400 }
+        _ = try await NoteWorkerPool.map(editable, limit: workers, activity: activity,
+            completed: { done, total in fraction(0.8 + Double(done) / Double(total) * 0.2) },
+            label: { "Editing “" + originals[editable[$0]].title + "”" }) { worker, _, index in
+            let section = originals[index]
+            document.update(index: index, worker: worker)
+            let sourceText = NoteEvidence.excerpts(for: section.text, source: source, limit: 1800)
+            let cap = length == .complete ? max(StudyBudget.words(section.text), StudyBudget.words(section.text) * 6 / 5) : StudyBudget.words(section.text)
+            func clean(_ value: String) -> String {
+                StudyBudget.limit(LiveNoteSection.normalized(value, title: section.title), words: cap)
+            }
+            let edited = try await infer.generate("TOPIC DRAFT:\n" + section.text + "\nRELEVANT ORIGINAL SOURCE EXCERPTS:\n" + sourceText,
+                instruction: "Edit only this topic as a college study note. Keep the heading. Remove repetition, filler and excessive examples. Combine overlapping points. Clarify an essential definition or condition only when supported by the source. These excerpts may be incomplete; do not delete a meaningful draft fact merely because it is absent here. Do not add outside facts, new numbers or another topic. Return the revised section only. " + length.instruction + " Keep it concise and within the draft’s existing scope.",
+                tokens: length == .brief ? 350 : 900, key: "editor-v7-" + length.rawValue,
+                partial: { value in
+                    let text = clean(value)
+                    if !text.isEmpty { document.update(index: index, value: text, worker: worker) }
+                })
+            let result = clean(edited)
+            document.update(index: index, value: result.isEmpty ? section.text : result, worker: nil)
+            return result
+        }
+        try Task.checkCancellation(); fraction(1)
+        return SummaryResult(summary: StudyBudget.limit(document.text, words: StudyBudget.maximum(length)), decisions: [], actions: [])
     }
     @available(macOS 26.0, *)
-    private static func generate(_ text: String, instruction: String, tokens: Int, key cacheTag: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
-        let key = "lecture-v6:" + cacheTag + instruction + "\n" + text
+    fileprivate static func generate(_ text: String, instruction: String, tokens: Int, key cacheTag: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
+        let key = "lecture-v7:" + cacheTag + instruction + "\n" + text
         if let saved = completedSections[key] { partial(saved); return saved }
         // Plain-text streaming avoids schema parsing failures and their full retries.
         let attempt = await AsyncDeadline.run(seconds: 120) {
@@ -123,16 +158,6 @@ enum AppleTextBudget {
         return output
     }
 }
-@MainActor private final class LectureDraft {
-    var sections: [Int: String] = [:]
-    let partial: @MainActor (String) -> Void
-    init(partial: @escaping @MainActor (String) -> Void) { self.partial = partial }
-    func update(index: Int, text: String) {
-        sections[index] = text
-        partial(LectureNotes.organize(sections.keys.sorted().compactMap { sections[$0] }))
-    }
-}
-
 // A malformed generated schema must not abort a long lecture without trying
 // a fresh plain-text session. Cancellation always exits without another request.
 @MainActor enum AppleNotesRecovery {
