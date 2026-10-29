@@ -11,3 +11,5 @@ New checks cover the experimental Apple OS/hardware/enablement/readiness gate, e
 Native screenshot smoke opens Connections and General settings separately to verify the fixed Done button, short connection cards, and Apple experimental availability explanation. Google app registration, Notion token creation, page permission policies and real account sync remain external acceptance checks.
 
 Google sign-in regression: use the real Network.framework listener and URLSession HTTP callback, simulate the browser only, ignore unrelated callback state, complete sign-in twice on the same instance, and fail promptly if the browser cannot open. The listener connection handler is now installed before start. Real Google consent and token exchange still require user approval in their browser.
+
+Notion setup explicitly describes the selected page as a parent: each meeting gets its own separate subpage. Settings and confirmation use folder/home wording to avoid implying that notes are combined into the selected page. Existing per-meeting page creation and reuse are unchanged.

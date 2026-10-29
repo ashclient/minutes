@@ -27,7 +27,7 @@ import AppKit
     @State private var error = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Two connections. One meeting page.").font(.system(size: 17, weight: .semibold))
+            Text("A separate page for every meeting.").font(.system(size: 17, weight: .semibold))
             Text("Google supplies your upcoming meetings. Notion keeps the finished notes. Both are optional.").font(.system(size: 12)).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 15) {
                 HStack { Label("Google Calendar", systemImage: "calendar").font(.system(size: 14, weight: .medium)); Spacer(); if calendar.authorized { Label("Connected", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) } }
@@ -53,8 +53,8 @@ import AppKit
             }.padding(16).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 15) {
                 HStack { Label("Notion", systemImage: "doc.text").font(.system(size: 14, weight: .medium)); Spacer(); if notionEnabled { Label("Connected", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) } }
-                Text(notionEnabled ? "Meetings save to " + (UserDefaults.standard.string(forKey: "notionDestinationTitle") ?? "your selected Notion destination") + "." : "Give each meeting its own Notion page.").font(.system(size: 12)).foregroundStyle(.secondary)
-                HStack { Button(notionEnabled ? "Change Notion page" : "Connect Notion") { notion = true }.buttonStyle(.bordered); Spacer(); if notionEnabled { Button("Disconnect") { do { try CloudKey.save("", service: "notion"); notionEnabled = false } catch { self.error = error.localizedDescription } }.buttonStyle(.plain).foregroundStyle(.secondary) } }.font(.caption)
+                Text(notionEnabled ? "Separate meeting pages are created inside " + (UserDefaults.standard.string(forKey: "notionDestinationTitle") ?? "your selected Notion destination") + "." : "Give each meeting its own Notion page.").font(.system(size: 12)).foregroundStyle(.secondary)
+                HStack { Button(notionEnabled ? "Change meeting folder" : "Connect Notion") { notion = true }.buttonStyle(.bordered); Spacer(); if notionEnabled { Button("Disconnect") { do { try CloudKey.save("", service: "notion"); notionEnabled = false } catch { self.error = error.localizedDescription } }.buttonStyle(.plain).foregroundStyle(.secondary) } }.font(.caption)
                 if notionEnabled {
                     DisclosureGroup("Sync options", isExpanded: $syncOptions) {
                         VStack(alignment: .leading, spacing: 10) { Toggle("Save notes automatically", isOn: $autoSync); Toggle("Include transcript", isOn: $includeTranscript); Text("Keep edits made directly in Notion outside the section managed by Minutes.").font(.caption).foregroundStyle(.secondary) }.padding(.top, 9)

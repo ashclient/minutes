@@ -27,7 +27,7 @@ struct NotionPageChoice: Identifiable, Equatable {
     @State private var message = ""
     @State private var cursor: String?
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack { Text("Connect Notion").font(.title3).fontWeight(.semibold); Spacer(); Text("\(step + 1) of 2").font(.caption).foregroundStyle(.secondary); Button("Cancel") { dismiss() } }
             Divider()
             if step == 0 {
@@ -42,8 +42,8 @@ struct NotionPageChoice: Identifiable, Equatable {
                 Spacer(minLength: 0)
                 HStack { Spacer(); Button(working ? "Checking…" : "Continue") { Task { await verify() } }.buttonStyle(.borderedProminent).disabled(working) }
             } else {
-                Text("Choose where meetings go").font(.system(size: 19, weight: .semibold))
-                Text("Minutes will create each meeting as a new page here.").font(.callout).foregroundStyle(.secondary)
+                Text("Choose a home for meeting pages").font(.system(size: 19, weight: .semibold))
+                Text("Each meeting gets a separate subpage inside the page you choose. Your meetings stay separate; the parent page is only their home.").font(.callout).foregroundStyle(.secondary)
                 TextField("Find a Notion page", text: $query).textFieldStyle(.roundedBorder)
                 List(pages) { page in
                     Button { selected = page.id } label: { HStack { Image(systemName: "doc").foregroundStyle(.secondary); Text(page.title).lineLimit(1); Spacer(); if selected == page.id { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) } }.padding(.vertical, 5).contentShape(Rectangle()) }.buttonStyle(.plain)
@@ -56,7 +56,7 @@ struct NotionPageChoice: Identifiable, Equatable {
                 DisclosureGroup("My page isn’t listed", isExpanded: $manual) {
                     VStack(alignment: .leading, spacing: 7) { Text("Copy its link from Notion and paste it below. Internal connections must be added to that page first.").font(.caption).foregroundStyle(.secondary); TextField("Notion page link", text: $manualURL).textFieldStyle(.roundedBorder) }.padding(.top, 6)
                 }.font(.caption)
-                HStack { Button("Back") { step = 0 }; Spacer(); Button(working ? "Connecting…" : "Use this page") { Task { await finish() } }.buttonStyle(.borderedProminent).disabled(working) }
+                HStack { Button("Back") { step = 0 }; Spacer(); Button(working ? "Connecting…" : "Save meetings here") { Task { await finish() } }.buttonStyle(.borderedProminent).disabled(working) }
             }
             if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         }.padding(24).frame(width: 490, height: 550)
@@ -94,7 +94,7 @@ struct NotionPageChoice: Identifiable, Equatable {
             let choice = pages.first { $0.id == selected }
             let id: String
             if manual && !manualURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { id = try NotionClient.identifier(manualURL) }
-            else { guard let choice else { throw AppFailure("Click a page in the list, then choose Use this page.") }; id = choice.id }
+            else { guard let choice else { throw AppFailure("Choose a parent page, then click Save meetings here.") }; id = choice.id }
             let object = try await NotionClient(token: verifiedKey).call("pages/" + id)
             guard let page = NotionPageChoice.parse(object) else { throw AppFailure("That Notion page is unavailable. Choose another page.") }
             try CloudKey.save(verifiedKey, service: "notion")
