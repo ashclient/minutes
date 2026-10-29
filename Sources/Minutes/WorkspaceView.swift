@@ -155,7 +155,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                     Button(meeting.favorite ? "Remove favorite" : "Favorite") { store.update(meeting.id) { $0.favorite.toggle() } }
                     Button("Manage recordings…") { detailsID = meeting.id }
                     if !meeting.audioFiles.isEmpty { Button("Transcribe again…") { transcribeAgain = true }.disabled(!processingAvailable) }
-                    if !meeting.summary.isEmpty { Button("Generate again…") { regenerate = true }.disabled(!processingAvailable) }
+                    if !meeting.summary.isEmpty { Button("Regenerate summary…") { regenerate = true }.disabled(!processingAvailable) }
                     Button("Sync to Notion") { sync(meeting.id) }
                     Divider(); Button("Move to Trash") { store.update(meeting.id) { $0.trashed = true }; store.selectedID = nil }.disabled(protected(meeting.id))
                 } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 22)
@@ -187,6 +187,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 Divider()
                 HStack {
                     Text("Meeting notes").font(.system(size: 14, weight: .semibold)); Spacer()
+                    Button("Regenerate…") { regenerate = true }.disabled(!processingAvailable)
                     Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(note.finishedNotes, forType: .string) } label: { Label("Copy", systemImage: "doc.on.doc") }
                     Button { draft = note.finishedNotes; editingID = note.id } label: { Label("Edit", systemImage: "pencil") }.disabled(processingSelected)
                 }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary)

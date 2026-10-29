@@ -88,9 +88,16 @@ struct AIClient: Sendable {
         // no recursive compression of finished notes.
         let parts = Self.chunks(source, limit: 12000)
         await progress("Writing your notes…")
-        let sections = try await OrderedBatch.map(Array(parts.enumerated()), concurrency: 3, progress: fraction) { item in
+        let sections = try await OrderedBatch.map(Array(parts.enumerated()), concurrency: 3, progress: { awaitFraction in fraction(awaitFraction * 0.65) }) { item in
             try await generate(system: system, text: "<source section=\"\(item.offset + 1)\" total=\"\(parts.count)\">\n\(item.element)\n</source>")
         }
-        return NotesLength.combine(sections)
+        await progress("Checking accuracy and organizing notes…")
+        let reviewed = try await OrderedBatch.map(Array(sections.enumerated()), concurrency: 3, progress: { value in fraction(0.65 + value * 0.35) }) { item in
+            let previous = item.offset > 0 ? String(sections[item.offset - 1].summary.suffix(2500)) : ""
+            let draft = try JSONEncoder().encode(item.element)
+            return try await generate(system: NotesLength.basePrompt + "\n" + length.instruction + "\n" + NotesLength.reviewPrompt,
+                text: "PREVIOUS SECTION (context only, do not repeat):\n" + previous + "\nORIGINAL SOURCE FOR THIS SECTION:\n" + parts[item.offset] + "\nDRAFT TO CHECK:\n" + String(decoding: draft, as: UTF8.self))
+        }
+        return NotesLength.combine(reviewed)
     }
 }
