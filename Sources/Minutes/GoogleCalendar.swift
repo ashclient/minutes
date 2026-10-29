@@ -143,8 +143,8 @@ private final class GoogleCallbackConnection: @unchecked Sendable {
     private let signIn = GoogleSignIn()
     private var refreshing: Task<GoogleTokens, Error>?
     private var generation = 0
-    var configured: Bool { (try? CloudKey.read(service: "google.client").isEmpty == false) ?? false }
-    var connected: Bool { (try? CloudKey.read(service: "google.tokens").isEmpty == false) ?? false }
+    var configured: Bool { (try? CloudKey.contains(service: "google.client")) ?? false }
+    var connected: Bool { (try? CloudKey.contains(service: "google.tokens")) ?? false }
     func importConfig(_ data: Data) throws {
         let value = try GoogleClientConfig.imported(data)
         if let old = try? loadConfig(), old.client_id != value.client_id { try disconnect() }

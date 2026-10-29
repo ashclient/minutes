@@ -1,9 +1,8 @@
-# Minutes 2.5.2
+# Minutes 2.5.3
 
-- Reworked Auto / Outline around personal class notes: short plain explanations mixed with useful lists, rather than a report of everything said.
-- Adapts to business definitions and comparisons, accounting scenarios and account effects, and math variables, formulas and worked steps.
-- Retains the meaning of definitions and the setup of selected examples through Apple's evidence passes. Drops repetition and incomplete examples.
-- Keeps repeated account labels and numbered steps in separate worked examples during consolidation.
-- Added hover feedback to the finish-sheet detail choices.
+- Google connection status checks no longer read credentials or request authentication.
+- Successful credential reads are reused within the running app, so parallel calendar requests do not each read the same Keychain item.
+- Briefly suppresses repeated requests after a denied read. Failed access is never treated as a missing credential.
+- Token refresh, key changes and disconnect update the in-memory cache only after Keychain storage succeeds.
 
-Use Regenerate → Auto with Outline on an existing note to apply the new style. Recording, transcription and custom notes are retained. This release changes instructions and consolidation; exact model output still depends on source quality and the selected provider.
+For existing authorization prompts, enter the login keychain password and choose Always Allow for each Minutes item. This release retains Keychain protection. Because current releases use ad-hoc signatures, updating the app can still require renewed trust; this change reduces repeated access requests within a running session.

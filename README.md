@@ -1,4 +1,4 @@
-# Minutes 2.5.2
+# Minutes 2.5.3
 
 Native macOS meeting and lecture notes with Apple transcription, optional Apple Intelligence or OpenRouter, Google Calendar and Notion. Runs on macOS 14+; modern Apple speech needs macOS 26 on eligible hardware. Experimental Apple Intelligence generation currently requires macOS 27 and a ready system model.
 
@@ -33,3 +33,5 @@ Sync writes native headings, nested bullets/numbered steps, formatted rich text 
 Audio stays in `~/Library/Application Support/Minutes/Audio`; copy the entire Minutes support folder while closed for an audio-inclusive backup. JSON backups do not include audio. Quit saves text and closes capture without waiting for AI.
 
 Build on a Mac with `bash build.command`. `MINUTES_RUN_TESTS=1` requires full Xcode. `MINUTES_UNIVERSAL=1` builds Apple Silicon and Intel, including the update helper. CI runs tests, verifies signatures/architectures, exercises the real helper against disposable app copies, and captures native UI previews. Live microphone/system-audio performance, Apple model quality/speed and account workflows still require real hardware/account testing.
+
+Keychain access: Google status checks read metadata without requesting credential bytes. Successful credential reads are shared in process memory, including concurrent requests; refreshed or disconnected credentials update that cache after a successful Keychain write. Denied reads briefly suppress duplicate requests. Secrets remain in Keychain between launches. Ad-hoc release signatures can still require renewed authorization after an update; consistent certificate-based signing is needed for identity continuity.
