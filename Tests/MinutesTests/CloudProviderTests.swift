@@ -66,15 +66,15 @@ final class CloudProviderTests: XCTestCase {
         XCTAssertThrowsError(try AIClient.decode(cut, status: 200, provider: .nvidia))
         XCTAssertThrowsError(try AIClient.decode(Data(), status: 401, provider: .nvidia)) { error in XCTAssertTrue(error.localizedDescription.contains("NVIDIA")) }
     }
-    @MainActor func testOpenRouterRetriesMalformedSchemaAsMarkdownWithoutSwitchingProviders() async throws {
+    @MainActor func testOpenRouterUsesMarkdownAndOnePinnedModelAcrossDraftAndReview() async throws {
         CloudMock.state.reset()
         let result = try await AIClient(apiKey: "openrouter-only-key", session: session()).summarize("A synthetic source concept and its necessary condition.", progress: { _ in })
         XCTAssertTrue(result.summary.contains("## Main concept"))
         let requests = CloudMock.state.snapshot()
-        XCTAssertEqual(requests.count, 4) // draft + recovery, source check + recovery
-        XCTAssertEqual(requests.filter { $0["response_format"] == nil }.count, 2)
-        XCTAssertTrue(requests.allSatisfy { $0["test_host"] as? String == "openrouter.ai" && $0["test_auth"] as? String == "Bearer openrouter-only-key" })
-        for request in requests where request["response_format"] == nil {
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.allSatisfy { $0["response_format"] == nil && $0["stream"] as? Bool == true })
+        XCTAssertTrue(requests.allSatisfy { $0["test_host"] as? String == "openrouter.ai" && $0["test_auth"] as? String == "Bearer openrouter-only-key" && $0["model"] as? String == CloudAIProvider.fixedOpenRouterModel })
+        for request in requests {
             let messages = try XCTUnwrap(request["messages"] as? [[String: String]])
             XCTAssertTrue(messages[0]["content"]!.contains("Return only the finished Markdown"))
             XCTAssertFalse(messages[0]["content"]!.contains("Output only valid JSON"))
@@ -84,15 +84,15 @@ final class CloudProviderTests: XCTestCase {
         CloudMock.state.reset()
         try await AIClient(apiKey: "nvidia-test-key", session: session(), provider: .nvidia).checkConnection()
         let request = try XCTUnwrap(CloudMock.state.snapshot().first)
-        XCTAssertEqual(request["max_tokens"] as? Int, 128)
+        XCTAssertEqual(request["max_tokens"] as? Int, 32)
         XCTAssertEqual(request["test_host"] as? String, "integrate.api.nvidia.com")
         let messages = try XCTUnwrap(request["messages"] as? [[String: String]])
-        XCTAssertEqual(messages.last?["content"], "Reply with ## Connection followed by Connection is working.")
+        XCTAssertEqual(messages.last?["content"], "Reply only with OK.")
     }
     @MainActor func testAutoCloudProgressWaitsForFinalConsolidation() async throws {
         CloudMock.state.reset(); var values: [Double] = []
         _ = try await AIClient(apiKey: "test", session: session(), provider: .nvidia).summarize("A source concept and a condition.", length: .auto, fraction: { values.append($0) }, progress: { _ in })
-        XCTAssertEqual(values, values.sorted()); XCTAssertTrue(values.contains(0.85)); XCTAssertEqual(values.last, 1)
+        XCTAssertEqual(values, values.sorted()); XCTAssertTrue(values.contains(0.5)); XCTAssertFalse(values.contains(0.85)); XCTAssertEqual(values.last, 1)
     }
     @MainActor func testNvidiaDoesNotUseOpenRouterEnabledFlagOrKey() async throws {
         let defaults = UserDefaults.standard

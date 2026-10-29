@@ -15,7 +15,7 @@ import FoundationNetworking
         precondition(request.httpMethod == "POST")
         precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer " + key)
         let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
-        precondition(body["model"] as? String == "openrouter/free")
+        precondition(body["model"] as? String == CloudAIProvider.fixedOpenRouterModel)
         precondition(body["stream"] as? Bool == false)
         precondition((body["response_format"] as? [String: String])?["type"] == "json_object")
         precondition((body["provider"] as? [String: Bool])?["require_parameters"] == true)

@@ -9,7 +9,12 @@ enum CloudAIProvider: String, Sendable {
     var service: String { rawValue }
     var enabledKey: String { self == .nvidia ? "nvidiaEnabled" : "openRouterEnabled" }
     var endpoint: URL { self == .nvidia ? URL(string: "https://integrate.api.nvidia.com/v1/chat/completions")! : URL(string: "https://openrouter.ai/api/v1/chat/completions")! }
-    var model: String { self == .nvidia ? "nvidia/nemotron-3.5-lightning-30b-a3b" : "openrouter/free" }
+    static let fixedOpenRouterModel = "qwen/qwen3.8-27b:free"
+    var model: String {
+        if self == .nvidia { return "nvidia/nemotron-3.5-lightning-30b-a3b" }
+        let saved = UserDefaults.standard.string(forKey: "openRouterModel")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return saved.isEmpty ? Self.fixedOpenRouterModel : saved
+    }
     var keyURL: URL { self == .nvidia ? URL(string: "https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b")! : URL(string: "https://openrouter.ai/settings/keys")! }
 }
 
@@ -56,11 +61,12 @@ enum CloudNotesParser {
 }
 
 struct AIClient: Sendable {
-    static let defaultModel = "openrouter/free"
+    static let defaultModel = CloudAIProvider.fixedOpenRouterModel
     static let endpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     let apiKey: String
     var session: URLSession = .shared
     var provider: CloudAIProvider = .openRouter
+    var model: String? = nil
 
     static func markdownInstructions(_ text: String) -> String {
         text.replacingOccurrences(of: "Output only valid JSON: {\"title\":\"short descriptive title\",\"summary\":\"Markdown notes\",\"decisions\":[],\"actions\":[]}.", with: "Return only the Markdown study notes. No JSON wrapper or code fence.")
@@ -68,18 +74,19 @@ struct AIClient: Sendable {
             .replacingOccurrences(of: "Return the same JSON schema.", with: "Return Markdown notes only.")
             + "\nReturn only the finished Markdown notes, no JSON, analysis, preamble or code fences."
     }
-    static func request(key: String, system: String, text: String, provider: CloudAIProvider = .openRouter, markdown: Bool = false) throws -> URLRequest {
+    static func request(key: String, system: String, text: String, provider: CloudAIProvider = .openRouter, markdown: Bool = false, streaming: Bool = false, model: String? = nil) throws -> URLRequest {
         guard !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AppFailure("Add your \(provider.title) key to finish these notes.") }
         var request = URLRequest(url: provider.endpoint)
         request.httpMethod = "POST"; request.timeoutInterval = 180
         request.setValue("Bearer " + key, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let plain = markdown || provider == .nvidia
-        var body: [String: Any] = ["model": provider.model, "stream": false, "max_tokens": 8192,
+        request.setValue(streaming ? "text/event-stream" : "application/json", forHTTPHeaderField: "Accept")
+        let plain = markdown || streaming || provider == .nvidia
+        var body: [String: Any] = ["model": model ?? provider.model, "stream": streaming, "max_tokens": 8192,
             "messages": [["role": "system", "content": plain ? markdownInstructions(system) : system], ["role": "user", "content": text]]]
         if provider == .openRouter {
             request.setValue("Minutes", forHTTPHeaderField: "X-Title")
+            body["reasoning"] = ["enabled": false]
             if !plain { body["response_format"] = ["type": "json_object"]; body["provider"] = ["require_parameters": true] }
         } else {
             body["chat_template_kwargs"] = ["enable_thinking": false]
@@ -131,11 +138,10 @@ struct AIClient: Sendable {
         }
         throw AppFailure("\(provider.title) is unavailable. Try again shortly.")
     }
-    private func generate(system: String, text: String) async throws -> SummaryResult {
+    private func generate(system: String, text: String, partial: @escaping @MainActor (String) -> Void = { _ in }) async throws -> SummaryResult {
         for formatAttempt in 0...1 {
-            let request = try Self.request(key: apiKey, system: system, text: text, provider: provider, markdown: formatAttempt > 0)
-            let (data, response) = try await send(request)
-            do { return try Self.decode(data, status: response.statusCode, provider: provider) }
+            let request = try Self.request(key: apiKey, system: system, text: text, provider: provider, markdown: true, streaming: true, model: model)
+            do { return try await stream(request, partial: partial) }
             catch is CloudFormatFailure {
                 try Task.checkCancellation()
                 if formatAttempt == 1 { throw AppFailure("\(provider.title) did not return usable notes after a formatting retry. Your previous notes and transcript are kept.") }
@@ -143,13 +149,94 @@ struct AIClient: Sendable {
         }
         throw CloudFormatFailure()
     }
-    func checkConnection() async throws {
-        var request = try Self.request(key: apiKey, system: "Write a two-line connection test. No private data is supplied.", text: "Reply with ## Connection followed by Connection is working.", provider: provider, markdown: true)
-        request.timeoutInterval = 30
-        var body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
-        body["max_tokens"] = 128; request.httpBody = try JSONSerialization.data(withJSONObject: body)
+    private func stream(_ request: URLRequest, partial: @escaping @MainActor (String) -> Void) async throws -> SummaryResult {
+        #if os(macOS)
+        for attempt in 0...1 {
+            try Task.checkCancellation()
+            let bytes: URLSession.AsyncBytes
+            let response: URLResponse
+            do { (bytes, response) = try await session.bytes(for: request) }
+            catch { if Task.isCancelled { throw CancellationError() }; throw AppFailure("Could not reach \(provider.title). Your current notes are kept; check your connection and retry.") }
+            guard let http = response as? HTTPURLResponse else { throw AppFailure("No response from \(provider.title).") }
+            if http.statusCode != 200 {
+                // Cancel the response immediately; never leave a queued task running.
+                bytes.task.cancel()
+                if attempt == 0, [429, 502, 503, 504].contains(http.statusCode) {
+                    let delay = min(30, max(2, Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 5))
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)); continue
+                }
+                return try Self.decode(Data(), status: http.statusCode, provider: provider)
+            }
+            return try await withTaskCancellationHandler {
+                defer { bytes.task.cancel() }
+                // Some compatible servers ignore stream=true. Accept their normal
+                // envelope without displaying its JSON wrapper as a live draft.
+                if !(http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().contains("text/event-stream") {
+                    var data = Data()
+                    for try await byte in bytes {
+                        try Task.checkCancellation(); data.append(byte)
+                        if data.count > 4_000_000 { throw CloudFormatFailure() }
+                    }
+                    let result = try Self.decode(data, status: 200, provider: provider)
+                    await partial(result.summary); return result
+                }
+                var decoder = CloudEventStream()
+                var lastUpdate = Date.distantPast
+                do {
+                    var lineBytes = Data()
+                    for try await byte in bytes {
+                        if byte != 10 {
+                            lineBytes.append(byte)
+                            guard lineBytes.count <= 1_000_000 else { throw CloudFormatFailure() }
+                            continue
+                        }
+                        try Task.checkCancellation()
+                        if lineBytes.last == 13 { lineBytes.removeLast() }
+                        guard let line = String(data: lineBytes, encoding: .utf8) else { throw CloudFormatFailure() }
+                        lineBytes.removeAll(keepingCapacity: true)
+                        try decoder.line(line)
+                        if Date().timeIntervalSince(lastUpdate) >= 0.08, let preview = decoder.preview {
+                            await partial(preview); lastUpdate = Date()
+                        }
+                        if decoder.done { break }
+                    }
+                    if !lineBytes.isEmpty {
+                        guard let line = String(data: lineBytes, encoding: .utf8) else { throw CloudFormatFailure() }
+                        try decoder.line(line.trimmingCharacters(in: .newlines))
+                    }
+                    try Task.checkCancellation()
+                    let result = try decoder.finish(provider: provider)
+                    await partial(result.summary)
+                    return result
+                } catch {
+                    if Task.isCancelled { throw CancellationError() }
+                    throw error
+                }
+            } onCancel: { bytes.task.cancel() }
+        }
+        throw AppFailure("\(provider.title) is unavailable. Try again shortly.")
+        #else
         let (data, response) = try await send(request)
-        _ = try Self.decode(data, status: response.statusCode, provider: provider)
+        return try Self.decode(data, status: response.statusCode, provider: provider)
+        #endif
+    }
+    func checkConnection() async throws {
+        var request = try Self.request(key: apiKey, system: "This is a connection test. No private data is supplied.", text: "Reply only with OK.", provider: provider, markdown: true, model: model)
+        request.timeoutInterval = 45
+        var body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+        body["max_tokens"] = 32; request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await send(request)
+        if response.statusCode != 200 { _ = try Self.decode(data, status: response.statusCode, provider: provider) }
+        // A connectivity check is not a notes-format test: a perfectly valid "OK"
+        // must not fail the Markdown parser's minimum length requirement.
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let choice = (object?["choices"] as? [[String: Any]])?.first
+        let message = choice?["message"] as? [String: Any]
+        guard object?["error"] == nil, let content = message?["content"] as? String,
+              !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              choice?["finish_reason"] as? String == "stop" else {
+            throw AppFailure("\(provider.title) responded but did not complete the test. Retry; the model may be busy.")
+        }
     }
     static func chunks(_ text: String, limit: Int = 10000) -> [String] {
         guard !text.isEmpty, limit > 0 else { return [] }
@@ -165,24 +252,89 @@ struct AIClient: Sendable {
         if !rest.isEmpty { chunks.append(String(rest)) }
         return chunks
     }
-    func summarize(_ source: String, length: NotesLength = .complete, format: StudyFormat = .outline, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void) async throws -> SummaryResult {
+    func summarize(_ source: String, length: NotesLength = .complete, format: StudyFormat = .outline, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void, partial: @escaping @MainActor (String) -> Void = { _ in }) async throws -> SummaryResult {
         guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AppFailure("No speech was found. You can listen to the saved recording.") }
         let system = NotesLength.basePrompt + "\n" + length.instruction + "\n" + format.instruction
-        // Each worker drafts then verifies its own section; a slow draft no longer
-        // blocks reviews of every other section. Bound total network requests to four.
-        let parts = Self.chunks(source, limit: provider == .nvidia ? 180000 : 18000)
-        await progress("Writing and checking your notes…")
-        let reviewed = try await OrderedBatch.map(Array(parts.enumerated()), concurrency: provider == .nvidia ? 2 : 4, progress: { value in fraction(value * (length == .complete ? 1 : 0.85)) }) { item in
-            let section = try await generate(system: system, text: "<source section=\"\(item.offset + 1)\" total=\"\(parts.count)\">\n\(item.element)\n</source>")
-            let previous = item.offset > 0 ? String(parts[item.offset - 1].suffix(2000)) : ""
-            let draft = try JSONEncoder().encode(section)
-            return try await generate(system: system + "\n" + NotesLength.reviewPrompt,
-                text: "PREVIOUS SECTION (context only, do not repeat):\n" + previous + "\nORIGINAL SOURCE FOR THIS SECTION:\n" + item.element + "\nDRAFT TO CHECK:\n" + String(decoding: draft, as: UTF8.self))
+        // Both pinned defaults have large contexts. Most lectures fit one source
+        // request. Serialize cloud work to avoid hammering free endpoint limits.
+        let parts = Self.chunks(source, limit: 180000)
+        let consolidate = parts.count > 1 && length != .complete
+        let steps = parts.count * 2 + (consolidate ? 1 : 0)
+        var reviewed: [SummaryResult] = []
+        await fraction(0)
+        for (index, part) in parts.enumerated() {
+            try Task.checkCancellation()
+            let prefix = reviewed.map(\.summary).joined(separator: "\n\n")
+            let show: @MainActor (String) -> Void = { text in
+                partial(StudyBudget.limit(prefix.isEmpty ? text : prefix + "\n\n" + text, words: StudyBudget.maximum(length)))
+            }
+            await progress("Writing draft \(index + 1) of \(parts.count) · streaming…")
+            let section = try await generate(system: system, text: "<source section=\"\(index + 1)\" total=\"\(parts.count)\">\n\(part)\n</source>", partial: show)
+            await fraction(Double(index * 2 + 1) / Double(steps))
+            await progress("Checking draft \(index + 1) of \(parts.count) against your transcript · streaming…")
+            let previous = index > 0 ? String(parts[index - 1].suffix(2000)) : ""
+            let checked = try await generate(system: system + "\n" + NotesLength.reviewPrompt,
+                text: "PREVIOUS SECTION (context only, do not repeat):\n" + previous + "\nORIGINAL SOURCE FOR THIS SECTION:\n" + part + "\nDRAFT TO CHECK:\n" + section.summary, partial: show)
+            reviewed.append(checked)
+            await fraction(Double(index * 2 + 2) / Double(steps))
         }
         let combined = NotesLength.combine(reviewed)
-        guard length != .complete else { return combined }
-        let final = try await generate(system: system + "\nConsolidate these extracts for the ENTIRE lecture. The selected length instruction takes priority over the detail retained in the extracts. Apply its whole-document requirements; Auto should be concise and selective. Merge synonymous topics and remove duplication across sections. No invented assignments or examples.", text: combined.summary)
-        await fraction(1)
-        return SummaryResult(title: combined.title, summary: StudyBudget.limit(final.summary, words: StudyBudget.maximum(length)), decisions: final.decisions, actions: final.actions)
+        var result = combined
+        if consolidate {
+            await progress("Combining topics across the lecture · streaming…")
+            result = try await generate(system: system + "\nConsolidate these extracts for the ENTIRE lecture. The selected length instruction takes priority over the detail retained in the extracts. Apply its whole-document requirements; Auto should be concise and selective. Merge synonymous topics and remove duplication across sections. No invented assignments or examples.", text: combined.summary, partial: { partial(StudyBudget.limit($0, words: StudyBudget.maximum(length))) })
+        }
+        try Task.checkCancellation()
+        let final = SummaryResult(title: result.title ?? combined.title, summary: StudyBudget.limit(result.summary, words: StudyBudget.maximum(length)), decisions: result.decisions, actions: result.actions)
+        await partial(final.summary); await fraction(1)
+        return final
+    }
+}
+
+// SSE framing is independent from networking so comments, multi-line events,
+// provider errors, reasoning deltas and interrupted streams can be tested directly.
+struct CloudEventStream {
+    private var event: [String] = []
+    private(set) var content = ""
+    private(set) var done = false
+    private var terminal: String?
+    mutating func line(_ line: String) throws {
+        guard !done else { return }
+        if line.isEmpty { try dispatch(); return }
+        if line.hasPrefix("data:") {
+            var value = String(line.dropFirst(5)); if value.hasPrefix(" ") { value.removeFirst() }
+            event.append(value)
+            guard event.joined().utf8.count <= 1_000_000 else { throw CloudFormatFailure() }
+        }
+    }
+    private mutating func dispatch() throws {
+        guard !event.isEmpty else { return }
+        let payload = event.joined(separator: "\n"); event.removeAll(keepingCapacity: true)
+        if payload == "[DONE]" { done = true; return }
+        guard let data = payload.data(using: .utf8), let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw CloudFormatFailure() }
+        if object["error"] != nil { throw AppFailure("The cloud provider interrupted generation. Your previous notes are kept; retry or keep the partial draft.") }
+        for choice in object["choices"] as? [[String: Any]] ?? [] where (choice["index"] as? Int ?? 0) == 0 {
+            if let reason = choice["finish_reason"] as? String { terminal = reason }
+            if let delta = choice["delta"] as? [String: Any], let text = delta["content"] as? String { content += text }
+        }
+        guard content.utf8.count <= 4_000_000 else { throw CloudFormatFailure() }
+    }
+    var preview: String? {
+        // Wait for inline reasoning to close, including a tag split over deltas.
+        var text = content
+        if text.contains("<think>") {
+            guard text.contains("</think>") else { return nil }
+            text = text.replacingOccurrences(of: "(?s)<think>.*?</think>", with: "", options: .regularExpression)
+        }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !text.hasPrefix("<"), !text.hasPrefix("{"), !text.hasPrefix("["), !text.hasPrefix("\""), !text.hasPrefix("```") else { return nil }
+        return text
+    }
+    mutating func finish(provider: CloudAIProvider) throws -> SummaryResult {
+        try dispatch()
+        guard done, terminal == "stop" else {
+            throw AppFailure("\(provider.title)’s stream ended before the notes finished. Your previous notes are kept; retry or keep the partial draft.")
+        }
+        return try CloudNotesParser.parse(content)
     }
 }

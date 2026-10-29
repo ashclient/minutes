@@ -15,31 +15,43 @@ import AppKit
     @State private var message = ""
     @State private var more = false
     @AppStorage("notesAIProvider") private var provider = "openrouter"
+    @AppStorage("openRouterModel") private var openRouterModel = CloudAIProvider.fixedOpenRouterModel
     @State private var apple = AppleAIAvailability.current
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Who should write your meeting notes?").font(.system(size: 17, weight: .semibold))
-            providerButton("OpenRouter", detail: "Automatic free cloud model", selected: provider == "openrouter") { provider = "openrouter" }.disabled(saving)
+            providerButton("OpenRouter", detail: "Qwen3.8 27B · fixed free model", selected: provider == "openrouter") { provider = "openrouter" }.disabled(saving)
             providerButton("NVIDIA API", detail: "Nemotron 3.5 Lightning · cloud", selected: provider == "nvidia") { provider = "nvidia" }.disabled(saving)
             providerButton("Apple Intelligence", detail: "Experimental · on this Mac · no API key", selected: provider == "apple") { if apple.available { provider = "apple" } }.disabled(!apple.available || saving)
             HStack(alignment: .top) { Text(apple.message).font(.caption).foregroundStyle(.secondary); Spacer(); Button("Check again") { apple = AppleAIAvailability.current }.font(.caption) }
             if provider == "apple" {
                 Text("Uses Apple’s Foundation Models framework, the system model behind Apple Intelligence. It does not automate Siri. Longer recordings are summarized in sections; experimental summaries may be less detailed.").font(.callout).foregroundStyle(.secondary)
             } else {
-            Text("Add your " + cloud.title + " API key once. The model is selected for you.").font(.callout).foregroundStyle(.secondary)
+            Text("Add your " + cloud.title + " API key once.").font(.callout).foregroundStyle(.secondary)
             HStack {
                 SecureField(cloudEnabled ? "Replace " + cloud.title + " key" : cloud.title + " API key", text: $key).textFieldStyle(.roundedBorder).disabled(saving)
                 Button(saving ? "Checking…" : cloudEnabled ? "Update" : "Connect") { validationTask = Task { await check(save: true) } }.disabled(saving || key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             HStack {
-                Link("Get a " + cloud.title + " key", destination: cloud.keyURL)
+                Link("Get an " + cloud.title + " key", destination: cloud.keyURL)
                 Spacer()
                 if cloudEnabled {
                     Button("Test connection") { validationTask = Task { await check(save: false) } }.disabled(saving)
                     Label("Key saved", systemImage: "checkmark.circle").foregroundStyle(.secondary)
                 }
             }.font(.caption)
-            Text(cloud == .nvidia ? "Default: Nemotron 3.5 Lightning. Your transcript and typed notes are sent directly to NVIDIA; audio stays on your Mac. NVIDIA account limits and endpoint availability apply." : "Default: automatic free model. Your transcript and typed notes are sent to OpenRouter and its selected provider; audio stays on your Mac. Free limits and availability apply.").font(.caption).foregroundStyle(.secondary)
+            if cloud == .openRouter {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Model ID").font(.caption)
+                    TextField("qwen/qwen3.8-27b:free", text: $openRouterModel).textFieldStyle(.roundedBorder).disabled(saving)
+                    HStack {
+                        Text("Stays on this model. IDs without :free may charge your OpenRouter account.").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Reset") { openRouterModel = CloudAIProvider.fixedOpenRouterModel }.font(.caption).disabled(saving)
+                    }
+                }
+            }
+            Text(cloud == .nvidia ? "Default: Nemotron 3.5 Lightning. Your transcript and typed notes are sent directly to NVIDIA; audio stays on your Mac. NVIDIA account limits and endpoint availability apply." : "Default: Qwen3.8 27B (free), with no random model selection. Your transcript and typed notes are sent to OpenRouter and its selected provider; audio stays on your Mac. Free limits and availability apply.").font(.caption).foregroundStyle(.secondary)
             }
             if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary) }
             Divider()
@@ -77,7 +89,7 @@ import AppKit
             let candidate = entered.isEmpty ? try CloudKey.read(service: target.service) : entered
             // NVIDIA is validated before its key is persisted or enabled. A
             // manual test is available for either cloud provider's saved key.
-            if target == .nvidia || !save { try await AIClient(apiKey: candidate, provider: target).checkConnection() }
+            if target == .nvidia || !save { try await AIClient(apiKey: candidate, provider: target, model: target.model).checkConnection() }
             try Task.checkCancellation()
             if save {
                 try CloudKey.save(candidate, service: target.service)

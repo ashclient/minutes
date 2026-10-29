@@ -140,7 +140,7 @@ final class MinutesTests: XCTestCase {
     func testFreeRouterAndTextOnlyRequest() throws {
         let request = try AIClient.request(key: "test-key", system: "JSON", text: "Meeting text")
         let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
-        XCTAssertEqual(body["model"] as? String, "openrouter/free")
+        XCTAssertEqual(body["model"] as? String, CloudAIProvider.fixedOpenRouterModel)
         XCTAssertEqual(request.url?.host, "openrouter.ai")
         XCTAssertNil(body["audio"])
         XCTAssertNil(body["models"])
