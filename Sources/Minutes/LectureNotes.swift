@@ -13,7 +13,7 @@ enum LectureNotes {
             current = -1
             for raw in text.components(separatedBy: "\n") {
                 let line = raw.trimmingCharacters(in: .whitespaces)
-                if line.hasPrefix("#") {
+                if line.hasPrefix("## ") || line.hasPrefix("# ") {
                     let heading = String(line.drop(while: { $0 == "#" || $0 == " " }))
                     let key = heading.lowercased().trimmingCharacters(in: .punctuationCharacters)
                     if let i = headings.firstIndex(where: { $0.lowercased().trimmingCharacters(in: .punctuationCharacters) == key }) { current = i }
@@ -24,7 +24,7 @@ enum LectureNotes {
                         else { headings.append("Key concepts"); bodies.append([]); seen.append([]); current = headings.count - 1 }
                     }
                     let key = line.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
-                    if seen[current].insert(key).inserted { bodies[current].append(line) }
+                    if seen[current].insert(key).inserted { bodies[current].append(raw) }
                 }
             }
         }

@@ -38,6 +38,9 @@ enum NotionMarkdown {
         let lines = NoteMath.parts(markdown)
         var result: [[String: Any]] = [], code: [String] = []
         var fenced = false
+        var indentation = 0
+        var depths: [Int] = []
+        func emit(_ block: [String: Any]) { result.append(block); depths.append(indentation) }
         func append(_ text: String, type: String = "paragraph", checked: Bool? = nil, literal: Bool = false) {
             let spans = literal ? NotionClient.rich(text) : rich(text)
             // Respect the rich_text array limit without discarding any text.
@@ -47,13 +50,14 @@ enum NotionMarkdown {
                 let kind = start == 0 ? type : "paragraph"
                 if kind == "to_do" { payload["checked"] = checked ?? false }
                 if kind == "code" { payload["language"] = "plain text" }
-                result.append(["object": "block", "type": kind, kind: payload])
+                emit(["object": "block", "type": kind, kind: payload])
             }
         }
         for part in lines {
             let raw = part.text
+            indentation = raw.prefix(while: { $0 == " " || $0 == "\t" }).reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
             if part.equation && !fenced {
-                if part.text.count <= 1000 { result.append(["object": "block", "type": "equation", "equation": ["expression": part.text]]) }
+                if part.text.count <= 1000 { emit(["object": "block", "type": "equation", "equation": ["expression": part.text]]) }
                 else { append(NoteMath.readable(part.text)) }
                 continue
             }
@@ -61,7 +65,7 @@ enum NotionMarkdown {
             if line.hasPrefix("```") { if fenced { append(code.joined(separator: "\n"), type: "code", literal: true); code = [] }; fenced.toggle(); continue }
             if fenced { code.append(raw); continue }
             if line.isEmpty { continue }
-            if ["---", "***", "___"].contains(line) { result.append(["object": "block", "type": "divider", "divider": [:]]); continue }
+            if ["---", "***", "___"].contains(line) { emit(["object": "block", "type": "divider", "divider": [:]]); continue }
             let hashes = line.prefix { $0 == "#" }.count
             if (1...6).contains(hashes), line.dropFirst(hashes).hasPrefix(" ") { append(String(line.dropFirst(hashes + 1)), type: "heading_" + String(min(hashes, 3))); continue }
             if line.hasPrefix("**"), line.hasSuffix("**"), line.count > 4, !line.dropFirst(2).dropLast(2).contains("**") { append(String(line.dropFirst(2).dropLast(2)), type: "heading_3"); continue }
@@ -72,6 +76,33 @@ enum NotionMarkdown {
             append(line)
         }
         if !code.isEmpty { append(code.joined(separator: "\n"), type: "code", literal: true) }
+        return nested(result, depths: depths)
+    }
+    private static func nested(_ blocks: [[String: Any]], depths: [Int]) -> [[String: Any]] {
+        var roots: [NotionListNode] = [], stack: [(Int, NotionListNode)] = []
+        for (index, block) in blocks.enumerated() {
+            let depth = depths[index]
+            let node = NotionListNode(block)
+            while let last = stack.last, last.0 >= depth { stack.removeLast() }
+            if let parent = stack.last?.1, parent.children.count < 80 { parent.children.append(node) }
+            else { roots.append(node) }
+            let type = block["type"] as? String ?? ""
+            if ["bulleted_list_item", "numbered_list_item", "to_do"].contains(type), stack.count < 2 { stack.append((depth, node)) }
+            else if depth == 0 { stack = [] }
+        }
+        return roots.map { $0.object }
+    }
+}
+private final class NotionListNode {
+    let block: [String: Any]
+    var children: [NotionListNode] = []
+    init(_ block: [String: Any]) { self.block = block }
+    var object: [String: Any] {
+        var result = block
+        if !children.isEmpty, let type = block["type"] as? String, var payload = block[type] as? [String: Any] {
+            payload["children"] = children.map { $0.object }; result[type] = payload
+        }
         return result
     }
 }
+

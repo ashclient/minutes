@@ -6,14 +6,18 @@ struct NoteDocument: View, Equatable {
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 7) {
             ForEach(NoteMath.parts(text)) { part in
-                let line = NoteMath.readable(part.text)
+                let raw = NoteMath.readable(part.text)
+                let line = raw.trimmingCharacters(in: .whitespaces)
+                let indent = min(4, raw.prefix(while: { $0 == " " || $0 == "\t" }).count / 2)
                 if part.equation {
                     Text(NoteMath.readable(line)).font(.system(size: 14, design: .serif)).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading).padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7)).textSelection(.enabled)
                 } else if line.hasPrefix("#") {
-                    Text(line.drop(while: { $0 == "#" || $0 == " " })).font(.system(size: 15, weight: .semibold)).padding(.top, 10)
+                    Text(line.drop(while: { $0 == "#" || $0 == " " })).font(.system(size: line.hasPrefix("###") ? 14 : 17, weight: .semibold)).padding(.top, line.hasPrefix("###") ? 6 : 14)
                 } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
-                    HStack(alignment: .top, spacing: 8) { Text("•").foregroundStyle(.secondary); Text(.init(String(line.dropFirst(2)))).frame(maxWidth: .infinity, alignment: .leading) }
-                } else if !line.isEmpty { Text(.init(line)).frame(maxWidth: .infinity, alignment: .leading) }
+                    HStack(alignment: .top, spacing: 8) { Text("•").foregroundStyle(.secondary); Text(.init(String(line.dropFirst(2)))).frame(maxWidth: .infinity, alignment: .leading) }.padding(.leading, CGFloat(indent) * 16)
+                } else if let marker = line.range(of: "^[0-9]+[.)] +", options: .regularExpression) {
+                    HStack(alignment: .top, spacing: 8) { Text(String(line[marker])).foregroundStyle(.secondary).monospacedDigit(); Text(.init(String(line[marker.upperBound...]))).frame(maxWidth: .infinity, alignment: .leading) }.padding(.leading, CGFloat(indent) * 16)
+                } else if !line.isEmpty { Text(.init(line)).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, CGFloat(indent) * 16) }
             }
         }.font(.system(size: 13)).lineSpacing(4).textSelection(.enabled)
     }

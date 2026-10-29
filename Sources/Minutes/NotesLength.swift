@@ -37,7 +37,7 @@ enum StudyFormat: String, Codable, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
     var instruction: String {
         switch self {
-        case .outline: return "Use topic headings and concise explanatory bullets."
+        case .outline: return "Match personal college notes: ## topic headings, ### subtopics, concise plain-language bullets with indented supporting details; numbered steps for worked problems, short scenario statements and standalone formulas. Bold only important terms or warnings. Use a Review section only when the lecture actually reviews earlier material. Do not add repetitive Definition / Application / Outcome labels."
         case .cornell: return "Use topic headings, then bold Cue: and Notes: labels for each major concept. End with one brief synthesis. Do not use a table."
         case .questions: return "Use topic headings and bold study questions followed by concise answers. Questions are revision prompts, not assigned homework."
         }
