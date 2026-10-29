@@ -84,9 +84,10 @@ enum GoogleOAuth {
                             guard let port = listener.port else { self.finish(.failure(AppFailure("Could not open Google sign-in."))); return }
                             let redirect = "http://127.0.0.1:\(port.rawValue)/"
                             listener.newConnectionHandler = { [weak self] connection in
+                                let owner = self
                                 let reader = GoogleCallbackConnection(connection: connection) { request in
                                     Task { @MainActor in
-                                        guard let self else { return }
+                                        guard let self = owner else { return }
                                         guard let path = request.components(separatedBy: "\r\n").first?.split(separator: " ").dropFirst().first,
                                               URLComponents(string: "http://127.0.0.1" + path)?.queryItems?.first(where: { $0.name == "state" })?.value == state else { return }
                                         do { self.finish(.success((try GoogleOAuth.callback(request, state: state), redirect))) }

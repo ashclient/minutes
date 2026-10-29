@@ -1,10 +1,21 @@
 import Foundation
 import SwiftUI
 
+private actor NotionThrottle {
+    static let shared = NotionThrottle()
+    private var next = Date.distantPast
+    func wait() async throws {
+        let now = Date(); let slot = max(now, next); next = slot.addingTimeInterval(0.36)
+        let delay = slot.timeIntervalSince(now)
+        if delay > 0 { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+        try Task.checkCancellation()
+    }
+}
 struct NotionClient {
     let token: String
     var session: URLSession = .shared
     func call(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> [String: Any] {
+        try await NotionThrottle.shared.wait()
         var request = URLRequest(url: URL(string: "https://api.notion.com/v1/" + path)!)
         request.httpMethod = method; request.timeoutInterval = 45
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
