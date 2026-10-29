@@ -77,6 +77,16 @@ final class EvidenceCoverageTests: XCTestCase {
         XCTAssertNil(NoteSanityReview.patched("## Rewritten document", issue: issue[0], original: original))
         XCTAssertNil(NoteSanityReview.patched("{\"replacement\":\"\n## Another topic\nUnrelated\"}", issue: issue[0], original: original))
     }
+    func testReviewJobsCoverLongUnicodeTopicsWithoutSkippingOrClipping() {
+        let first = LiveNoteSection(title: "Long", text: "## Long\n" + String(repeating: "A distinct condition 中文 👨‍👩‍👧‍👦 remains important. ", count: 180))
+        let second = LiveNoteSection(title: "Last", text: "## Last\n- A late topic must also be checked.")
+        let jobs = NoteReviewJob.make([first, second])
+        XCTAssertGreaterThan(jobs.count, 3)
+        XCTAssertEqual(jobs.filter { $0.sectionIndex == 0 }.map(\.sourcePart).joined(), first.text)
+        XCTAssertEqual(jobs.filter { $0.sectionIndex == 1 }.map(\.sourcePart).joined(), second.text)
+        XCTAssertTrue(jobs.allSatisfy { $0.context.utf8.count <= 2056 })
+        XCTAssertTrue(jobs.filter { $0.part > 1 }.allSatisfy { $0.context.count > $0.sourcePart.count })
+    }
     func testInvalidEditorReplyPreservesLastCompleteTopicWithoutWordClipping() {
         let original = "## Inventory\n- The first purchase layer contains 20 units at 5 each.\n- The second layer contains 30 units at 6 each.\n- The method determines which complete layer costs are assigned."
         XCTAssertTrue(NoteQuality.complete(original))

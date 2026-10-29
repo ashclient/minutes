@@ -126,3 +126,22 @@ enum NoteSanityReview {
         return value
     }
 }
+
+struct NoteReviewJob: Sendable {
+    let sectionIndex: Int
+    let part: Int
+    let total: Int
+    let sourcePart: String
+    let context: String
+    static func make(_ sections: [LiveNoteSection]) -> [Self] {
+        var jobs: [Self] = []
+        for (index, section) in sections.enumerated() {
+            let parts = AppleTextBudget.chunks(section.text, bytes: 1800)
+            for (offset, part) in parts.enumerated() {
+                let overlap = offset > 0 ? String(String.UnicodeScalarView(parts[offset - 1].unicodeScalars.suffix(64))) : ""
+                jobs.append(Self(sectionIndex: index, part: offset + 1, total: parts.count, sourcePart: part, context: overlap + part))
+            }
+        }
+        return jobs
+    }
+}

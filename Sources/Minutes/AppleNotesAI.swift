@@ -128,7 +128,7 @@ enum AppleTextBudget {
             label: { "Writing “" + topicPlan[$0].title + "”" }) { worker, _, item in
             let (index, topic) = item
             document.update(index: index, worker: worker)
-            let cards = topic.ids.compactMap { byID[$0] }
+            let cards = topic.ids.sorted().compactMap { byID[$0] }
             let batches = EvidenceLedger.batches(cards)
             var completed: [String] = []
             for (batchIndex, batch) in batches.enumerated() {
@@ -154,26 +154,36 @@ enum AppleTextBudget {
         if editing {
             progress("Reviewers are doing a brief sanity check…")
             let originals = document.sections
-            let reviewable = originals.indices.filter { originals[$0].text.utf8.count <= 2400 }
+            let reviewJobs = NoteReviewJob.make(originals)
             let reviewerCount = max(1, workers - 1)
-            let findings = try await NoteWorkerPool.map(reviewable, limit: reviewerCount, activity: { values in
+            var reviewing: [Int: Set<Int>] = [:]
+            @MainActor func markReview(_ index: Int, worker: Int, active: Bool) {
+                if active { reviewing[index, default: []].insert(worker) }
+                else { reviewing[index]?.remove(worker) }
+                document.update(index: index, worker: reviewing[index]?.sorted().first)
+            }
+            let findings = try await NoteWorkerPool.map(reviewJobs, limit: reviewerCount, activity: { values in
                 activity(values.map { NoteWorker(id: workers > 1 ? $0.id + 1 : 1, task: $0.task) })
             }, completed: { done, total in fraction(0.85 + Double(done) / Double(total) * 0.1) },
-                label: { "Sanity check · “" + originals[reviewable[$0]].title + "”" }) { worker, _, index in
+                label: { "Sanity check · “" + originals[reviewJobs[$0].sectionIndex].title + "”" }) { worker, _, job in
+                let index = job.sectionIndex
                 let section = originals[index]
                 let reviewer = workers > 1 ? worker + 1 : 1
-                document.update(index: index, worker: reviewer)
-                let sourceText = NoteEvidence.excerpts(for: section.text, source: source, limit: 1800)
-                let report = try await infer.generate("COMPLETE TOPIC DRAFT:\n" + section.text + "\nRELEVANT ORIGINAL SOURCE EXCERPTS:\n" + sourceText, instruction: "You are a quick sanity reviewer, NOT a writer. Do not rewrite, expand, summarize or restyle the notes. Read for material factual contradictions, unsupported invented equations, broken calculations, or incomplete statements. Excerpts are partial: do NOT flag a draft fact merely because it is absent here. Ignore stylistic preferences and minor wording. Return only JSON {\"issues\":[{\"quote\":\"exact erroneous sentence or formula from the draft\",\"reason\":\"brief material problem\"}]}. Return {\"issues\":[]} when no material problem is evident. At most two issues. Quote a narrow exact span of at most 160 characters and give a reason under 100 characters. Do not quote the whole topic. No replacement notes.", tokens: 260, key: "sanity-v8", partial: { _ in })
-                document.update(index: index, worker: nil)
+                markReview(index, worker: reviewer, active: true)
+                let sourceText = NoteEvidence.excerpts(for: job.context, source: source, limit: 1800)
+                let report = try await infer.generate("TOPIC: " + section.title + "\nDRAFT FRAGMENT \(job.part) OF \(job.total):\n" + job.context + "\nRELEVANT ORIGINAL SOURCE EXCERPTS:\n" + sourceText, instruction: "You are a quick sanity reviewer, NOT a writer. Do not rewrite, expand, summarize or restyle the notes. Read for material factual contradictions, unsupported invented equations, or broken calculations. This may be a fragment with overlapping context: fragment boundaries are NOT errors or incomplete statements. Source excerpts are partial: do NOT flag a draft fact merely because it is absent here. Ignore stylistic preferences and minor wording. Return only JSON {\"issues\":[{\"quote\":\"exact erroneous sentence or formula from the draft\",\"reason\":\"brief material problem\"}]}. Return {\"issues\":[]} when no material problem is evident. At most two issues. Quote a narrow exact span of at most 160 characters and give a reason under 100 characters. Do not quote the whole topic. No replacement notes.", tokens: 260, key: "sanity-v8", partial: { _ in })
+                markReview(index, worker: reviewer, active: false)
                 return (index, NoteSanityReview.issues(report, original: section.text))
             }
             // Only the main writer can change notes, and only a quoted span.
             // Review replies are never treated as replacement topic content.
+            var checkedQuotes: [Int: Set<String>] = [:]
             for (index, issues) in findings where !issues.isEmpty {
                 for issue in issues {
+                    guard checkedQuotes[index, default: []].insert(issue.quote).inserted else { continue }
                     try Task.checkCancellation()
                     let original = document.sections[index].text
+                    guard original.contains(issue.quote) else { continue }
                     let sourceText = NoteEvidence.excerpts(for: issue.quote + " " + issue.reason, source: source, limit: 1800)
                     activity([NoteWorker(id: 1, task: "Correcting a flagged detail")])
                     document.update(index: index, worker: 1)
