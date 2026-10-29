@@ -62,6 +62,13 @@ import UniformTypeIdentifiers
                 await notion.sync(id: note.id, store: store)
             }
         }
+        .onAppear {
+            if UserDefaults.standard.bool(forKey: "notionAutoSync") {
+                for note in store.meetings where !note.trashed && note.notionNeedsSync == true && (note.notionPageID != nil || note.calendarEventKey != nil) {
+                    Task { await notion.sync(id: note.id, store: store) }
+                }
+            }
+        }
         .alert("Minutes", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("OK") { store.error = nil } } message: { Text(store.error ?? "") }
     }
     private var sidebarView: some View {

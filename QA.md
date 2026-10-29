@@ -1,7 +1,7 @@
-# Minutes 1.5 verification
+# Minutes 1.6 verification
 
-CI runs Foundation core checks, XCTest, Apple Silicon and Intel release builds, signature verification, app packaging, and a native launch/screenshot.
+The macOS runner compiles release builds for arm64 and x86_64, runs Foundation core checks and XCTest, verifies the signature and packages the app. A synthetic note fixture is used to inspect the native one-page workspace.
 
-New regression coverage checks pause omission, microphone mute silence, source ownership, stereo system sample-buffer extraction, resampler duration including its tail, recurring-calendar occurrence identity, reuse of existing notes, and Notion identifier/Unicode chunk limits. Existing persistence, corrupt-store protection, archive compatibility and text-only free-model request checks remain.
+Coverage includes PKCE's RFC test vector, read-only Google scopes, callback state validation and denial, Desktop-client import validation, refresh token retention, Google recurring occurrence identity across rescheduling, Notion title date mentions, local unsynced-edit persistence, repeated idle shutdown, pause/mute audio gating, stereo system PCM extraction and resampler tails. Existing storage, corruption, request and Unicode checks remain.
 
-Real hardware checks remain necessary for ScreenCaptureKit with output muted, simultaneous Apple speech sessions, floating controls across Spaces/full-screen apps, calendar permissions/account syncing, and Notion access/sync with a real secret. Credentials are not embedded or supplied to CI. Passing CI is not a claim that those account/hardware tests passed.
+A successful synthetic idle shutdown test does not establish live capture shutdown timing. Real permission prompts, muted system output, active-recording quit, browser Google consent and Notion synchronization require actual account/hardware acceptance. No real secrets are supplied to CI. ScreenCaptureKit is retained at the user's request.

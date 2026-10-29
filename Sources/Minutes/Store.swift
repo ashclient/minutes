@@ -55,7 +55,10 @@ import AppKit
     }
     func update(_ id: UUID, _ change: (inout Meeting) -> Void) {
         guard loaded, let i = meetings.firstIndex(where: { $0.id == id }) else { return }
-        change(&meetings[i]); meetings[i].updatedAt = Date(); persist()
+        let previous = meetings[i]
+        change(&meetings[i])
+        if previous.notes != meetings[i].notes || previous.summary != meetings[i].summary || previous.title != meetings[i].title || previous.transcript != meetings[i].transcript || previous.actions != meetings[i].actions || previous.eventStart != meetings[i].eventStart || previous.eventEnd != meetings[i].eventEnd { meetings[i].notionNeedsSync = true }
+        meetings[i].updatedAt = Date(); persist()
     }
     func persist() {
         guard loaded else { return }

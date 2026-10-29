@@ -162,10 +162,16 @@ import AVFoundation
             }
         }
         guard UserDefaults.standard.bool(forKey: "openRouterEnabled") else {
-            state("needsKey", "Transcript saved. Connect OpenRouter to finish your notes.", id: id, store: store); return
+            state("needsKey", "Recording and transcript saved. Connect AI if you’d like a summary.", id: id, store: store)
+            if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await NotionSync.shared.sync(id: id, store: store) } }
+            return
         }
         let key = try CloudKey.read()
-        guard !key.isEmpty else { state("needsKey", "Add your OpenRouter key to finish these notes.", id: id, store: store); return }
+        guard !key.isEmpty else {
+            state("needsKey", "Recording and transcript saved. Add your AI key for a summary.", id: id, store: store)
+            if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await NotionSync.shared.sync(id: id, store: store) } }
+            return
+        }
         state("generating", "Writing your notes…", id: id, store: store)
         let source = ["USER NOTES:\n" + meeting.notes, "TRANSCRIPT:\n" + meeting.transcriptText].filter { !$0.isEmpty }.joined(separator: "\n\n")
         let result = try await AIClient(apiKey: key).summarize(source, progress: { text in self.message = text; store.progress = text })

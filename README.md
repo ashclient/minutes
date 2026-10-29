@@ -1,43 +1,51 @@
-# Minutes 1.5
+# Minutes 1.6
 
-A native Mac app for meeting and lecture notes. macOS 14 or newer; the direct long-form Apple transcription engine requires macOS Tahoe 26 and supported hardware.
+Native Mac meeting notes. macOS 14+; the direct long-form Apple speech engine needs macOS Tahoe 26 on supported hardware.
 
-## Workspace
+## Everyday use
 
-The sidebar holds searchable notes, favorites, trash, and upcoming calendar events. Command-N makes a blank note. Select a meeting, then use Notes, AI notes, or Transcript. Your own notes save as you type, including during recording. Navigation, settings, imports, exports, and editing remain available while recording; removing or reprocessing the active capture is protected.
+1. Choose an upcoming Google Calendar event on the left, or click Blank note. A meeting opens with the event name and time. Clicking that event again reopens the same note; recurring occurrences have separate notes.
+2. Type in Your notes, or choose Microphone / Mic + computer and click Record this meeting. Recording adds a take to the selected meeting rather than unexpectedly creating a different note. You can keep writing or browse another note.
+3. Click Finish meeting. Apple finishes the transcript, then an OpenRouter free model writes the summary if AI is connected. Your writing, generated notes, expandable transcript and recording player are all on one page. To append another take, record in that same meeting again.
+4. Open in Notion opens its linked Notion page. Connected meetings create one page with the event title plus a real date mention. Finished notes update the same page. Typed changes sync after a short delay when auto-sync is on. A saved pending sync is retried next time Minutes opens.
 
-Expand Recordings inside a note for playback, seeking, duration, and playback speed. Tracks are labeled Microphone or Computer. Separate tracks play independently.
+The recording controls are labeled Mute, Pause/Resume, and Finish meeting. Mute affects only the microphone. Pause omits incoming audio from both tracks and pauses the timer. Switching apps shows the draggable floating controls. Expand Recordings for playback, seeking and speed. The note menu offers export, re-transcription, Notion sync and recording management.
 
-## Recording
+## Quit when you want
 
-Choose Microphone or Mic + computer beside Record meeting. The current empty note is used; if it already has recorded audio or AI output, a new meeting is created. Source changes in Settings apply to the next recording.
+Command-Q saves text immediately, cancels processing, and closes audio capture without waiting for speech or AI. Interrupted work is saved for Finish notes on reopening. Quit has a four-second ceiling if an OS capture service is stalled; in that exceptional case the last in-flight audio buffers may not finish closing. A normal finish still waits for Apple to finalize the transcript. Closing just the main window leaves recording running with floating controls.
 
-Both enabled sources have independent live Apple transcription feeds, meters, and transcript labels. Computer audio comes directly from ScreenCaptureKit and is not derived from the microphone. System audio permission must be allowed in macOS Privacy & Security → Screen & System Audio Recording. Protected or nonplaying media may supply no audio. To verify system capture, play normal speech in another app, mute the microphone using Minutes, and check the Computer meter and Computer-labeled transcript, including with the Mac output muted. Use headphones when both sources are on to avoid microphone pickup of speakers.
+## Connect Google Calendar
 
-The recording controls mute only the microphone, pause/resume both sources, or stop and make notes. Microphone mute writes silence to that track and speech feed. Pause omits incoming audio from both files and speech feeds, and stops the elapsed timer. Audio immediately before a control press can still finish transcribing. Switching to another app or minimizing Minutes shows a draggable floating control panel that does not steal focus; its arrow returns to the recording. You can browse other notes while recording.
+Minutes 1.6 reads Google Calendar directly. It no longer reads macOS Calendar or iCloud, and does not request EventKit access. Existing notes are preserved.
 
-Tahoe uses SpeechAnalyzer and Apple's SpeechTranscriber continuously for live and saved audio. Language assets may be installed once by macOS. On older systems the legacy recognizer is retained. New mic and computer tracks use lossless CAF files. They take disk space; remove saved recordings in Details after use if desired. If live recognition fails, the saved track is retried after stopping. Source labels are not speaker identification. Track clocks are approximate, not sample synchronized.
+This private app does not contain an invented or shared OAuth client. A one-time Google Desktop OAuth client setup is required before browser sign-in works:
 
-## AI notes
+1. Open a Google Cloud project and enable Google Calendar API.
+2. Configure the OAuth consent screen. For a project in Testing, add your Google account as a test user. Add the Calendar events read-only and Calendar list read-only scopes.
+3. Create a Desktop app OAuth client and download its JSON file.
+4. In Minutes → Connections → Google app setup, import that JSON, then click Connect Google and approve access in your browser. Choose which Google calendars appear.
 
-In Settings → General, save an OpenRouter key in macOS Keychain. The default `openrouter/free` router chooses an available free model. Free limits and availability apply. No local third-party language model is installed. After stopping, your transcript and own notes are sent as text to OpenRouter and its selected provider; audio stays on the Mac. AI notes can be copied, edited, regenerated, or exported. Transcribe again uses saved audio while preserving typed notes.
+The local callback listener binds only to 127.0.0.1 on an ephemeral port. Sign-in uses PKCE S256, random state checking, a three-minute timeout and a Cancel button. Client configuration and access/refresh tokens are kept in macOS Keychain. OAuth testing-mode token expiry and Google verification policies still apply. There is no calendar-write scope. For a public distribution, the developer must register and configure the distribution's Google OAuth client; that external setup has not been completed by this build.
 
-## Calendar and Notion
+## Connect Notion
 
-Open Connections in the sidebar.
+In Connections, create a Notion internal connection with read/insert/update content access. Share a parent page with it using that page's Connections menu. Paste the secret and parent page link into Minutes, then connect. New setups create ordinary child pages in that parent. An existing Notion database remains supported as an alternate destination, and old database-backed meeting links keep their parent type.
 
-1. Connect calendar and allow macOS Calendar access. Minutes reads upcoming events from calendars synced in macOS Calendar, including Google and iCloud. Add the same account used in Notion Calendar to macOS Internet Accounts and enable Calendars if events are missing. Choose which calendars appear. Minutes does not modify calendar events.
-2. Create a Notion internal connection with read, insert, and update content permissions. In Notion, share a parent page or database with it through the page's Connections menu. Save the secret in Minutes; it is stored separately in Keychain.
-3. Choose Create a Minutes database and paste the parent page link, or connect an existing database with title and date properties. The first data source is used; if there are multiple date properties, the alphabetically first is used.
-4. Click an upcoming event. Minutes reuses its note on later clicks, preserving your writing. Recurring occurrences get separate notes. When connected, a dated Notion page is created. Open in Notion takes you to it. Finished AI notes sync automatically if enabled; Sync to Notion is also available in the note menu. Transcripts are excluded unless enabled.
-5. In Notion Calendar, add the Minutes database to display its dated pages. Notion's own native upcoming-event-to-AI-note attachment flow is not exposed through its documented Calendar API. Minutes supplies its own upcoming sidebar and real Notion pages; it cannot force Notion's native event attachment or open an exact native Notion tab. Original calendar events remain unchanged.
+The page title contains the event name and a date mention (Notion chooses the relative date display, such as Today). The body shows your own notes and generated notes, and optionally the transcript. Minutes updates its own visible quote section; keep edits made directly in Notion outside that section. The page title and date are also updated on sync. Notion's exact native Calendar-to-AI-meeting-note attachment and tab controls are not exposed through the documented Calendar API; this app creates real Notion pages without claiming to control those native features.
 
-Sync is one-way from Minutes. It updates the page title/date and replaces its managed Minutes notes section; put edits made directly in Notion outside that section. Manual note changes can be pushed with Sync to Notion. Sync errors are shown with retry. The page ID is saved before content upload so a retry reuses it. Disconnecting does not delete existing notes or pages. A live Notion key and real calendar accounts are required to verify account-specific behavior.
+Sync is one-way from Minutes. The page ID is saved before content upload so normal retries reuse the page. Like other APIs without an idempotency key, a lost create-page response can leave an orphan page. Errors are visible with retry. No credentials or real account connections are exercised by CI.
+
+## Recording and AI
+
+Computer audio still uses ScreenCaptureKit, as requested. Approve macOS Screen & System Audio Recording when using Mic + computer. No screen video is written. Separate meters and transcript labels identify Microphone and Computer. Use headphones when both sources are on to avoid speaker pickup through the mic. To test direct capture, mute the microphone in Minutes and play normal speech in another app. Repeated system permission prompts have not been reproduced or verified fixed on the user's Mac; updating the app may require granting its screen/audio permission again.
+
+Audio files use lossless CAF and remain on the Mac. Apple's system language assets may install once. No third-party local LLM is installed. Configure an OpenRouter key under General for optional summaries, using the default automatic `openrouter/free` router. The transcript and typed notes are sent as text after finishing; audio is not sent to OpenRouter. Free limits and model availability apply. Notion receives the content selected in its sync settings.
 
 ## Data and build
 
-Replacing Minutes.app preserves `~/Library/Application Support/Minutes`. Copy that folder while the app is closed for an audio-inclusive backup. JSON backups contain text without audio. No recordings are automatically deleted.
+Replacing Minutes.app preserves ~/Library/Application Support/Minutes. Copy that entire folder while the app is closed for an audio-inclusive backup. JSON backups omit audio. Transcript and audio tracks survive summary errors and cancellation. Removing a saved recording in Manage recordings keeps its text.
 
-`bash build.command` runs Foundation core checks then builds the app with Apple Command Line Tools. `MINUTES_RUN_TESTS=1` requires full Xcode. Compiling this source now requires the macOS 26 SDK even when targeting older macOS. GitHub Actions runs tests, builds arm64 and x86_64, verifies the ad-hoc signature, and packages the app. The app is not Developer ID notarized.
+Build source using the macOS 26 SDK: bash build.command. Full Xcode is needed for MINUTES_RUN_TESTS=1. GitHub Actions builds Apple Silicon and Intel, runs core and XCTest checks, verifies the ad-hoc signature and captures the native workspace. The app is not Developer ID notarized.
 
-Hardware acceptance: use mic mute to isolate direct computer transcription; test output muted and headphones; pause/resume both sources; change focus to exercise floating controls; click a recurring event twice and connect a test Notion destination before using account sync. Synthetic tests check PCM channel extraction, pause/mute file gating, resampling, recurring-event identity, Notion text/IDs, persistence and the text-only AI request. These checks do not prove real speech accuracy or remote service behavior.
+Real Google/Notion sign-in, ScreenCaptureKit permissions and live audio still require testing with the user's accounts and hardware. Automated checks use synthetic audio, local storage and mocked network responses; they do not establish end-to-end account behavior.

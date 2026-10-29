@@ -122,7 +122,10 @@ struct NotionClient {
             let appended = try await client.call("blocks/" + meeting.notionPageID! + "/children", method: "PATCH", body: body)
             guard let result = (appended["results"] as? [[String: Any]])?.first, let block = result["id"] as? String else { throw AppFailure("Notion did not confirm the notes section.") }
             let old = meeting.notionBlockID
-            store.update(id) { $0.notionBlockID = block; $0.notionSyncedAt = Date(); $0.notionError = nil }; store.saveNow()
+            store.update(id) {
+                $0.notionBlockID = block; $0.notionSyncedAt = Date(); $0.notionError = nil
+                $0.notionNeedsSync = $0.notes != meeting.notes || $0.summary != meeting.summary || $0.title != meeting.title || $0.transcript != meeting.transcript || $0.eventStart != meeting.eventStart || $0.eventEnd != meeting.eventEnd
+            }; store.saveNow()
             if let old { _ = try await client.call("blocks/" + old, method: "PATCH", body: ["archived": true]) }
         } catch { store.update(id) { $0.notionError = error.localizedDescription } }
     }
