@@ -69,9 +69,15 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
         let task = Task { try await self.stopOnce() }; shutdown = task
         try await task.value
     }
-    private func stopOnce() async throws {
+    @MainActor private func stopOnce() async throws {
         var stopError: Error?
-        do { try await stream?.stopCapture() } catch { stopError = error }
+        let capturedStream = stream
+        let result = await AsyncDeadline.run(seconds: 2) { try await capturedStream?.stopCapture() }
+        switch result {
+        case .success: break
+        case .failure(let error): stopError = error
+        case nil: stopError = AppFailure("macOS took too long to release computer audio. The captured file is saved; finish its notes after reopening Minutes.")
+        }
         stream = nil
         // Drain callbacks before closing the file and ending the speech stream.
         let captured: MicrophoneSink? = await withCheckedContinuation { c in queue.async { c.resume(returning: self.sink) } }

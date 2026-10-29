@@ -25,7 +25,7 @@ import UniformTypeIdentifiers
     @State private var deletingID: UUID?
     private var meeting: Meeting? { store.meetings.first { $0.id == store.selectedID } }
     private var processingSelected: Bool { pipeline.working && pipeline.activeID == store.selectedID }
-    private var recordingSelected: Bool { recorder.recording && recorder.meetingID == store.selectedID }
+    private var recordingSelected: Bool { recorder.recording && recorder.meetingID == store.selectedID && pipeline.stage == "recording" }
     private var processingAvailable: Bool { !pipeline.working && !recorder.recording }
     private func protected(_ id: UUID) -> Bool { (recorder.recording && recorder.meetingID == id) || (pipeline.working && pipeline.activeID == id) }
     var body: some View {
@@ -208,7 +208,7 @@ import UniformTypeIdentifiers
     }
     private var footer: some View {
         VStack(spacing: 10) {
-            if recorder.recording {
+            if recorder.recording && !pipeline.working {
                 if recorder.meetingID != store.selectedID { Button { store.selectedID = recorder.meetingID } label: { HStack { Image(systemName: "arrow.turn.up.left"); Text("Return to recording"); Spacer(); Text(store.meetings.first { $0.id == recorder.meetingID }?.title ?? "").lineLimit(1) }.font(.system(size: 11)).foregroundStyle(.secondary) }.buttonStyle(.plain) }
                 HStack(spacing: 18) { sourceMeter("Mic", icon: recorder.microphoneMuted ? "mic.slash" : "mic", level: recorder.level, help: recorder.inputName); if recorder.computerEnabled { sourceMeter("Computer", icon: "speaker.wave.2", level: recorder.computerLevel, help: recorder.computerStatus) }; Spacer(minLength: 0) }
                 RecordingControls()

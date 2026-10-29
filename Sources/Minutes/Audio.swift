@@ -64,6 +64,7 @@ import CoreMedia
                     computerSpeech = speech
                 } catch { computerStatus = "Live computer speech unavailable; transcribing after stopping." }
                 let capture = ComputerAudio()
+                system = capture
                 do { try await capture.start(url: directory.appendingPathComponent(computerName), feed: speech.feed) }
                 catch { throw AppFailure("Computer audio could not start. " + error.localizedDescription) }
                 system = capture
@@ -71,8 +72,8 @@ import CoreMedia
             try Task.checkCancellation()
             try mic.start(url: directory.appendingPathComponent(micName), feed: microphoneSpeech.feed)
         } catch {
-            if let live { _ = await live.stop() }; live = nil
-            if let computerSpeech { _ = await computerSpeech.stop() }; computerSpeech = nil
+            live?.cancel(); live = nil
+            computerSpeech?.cancel(); computerSpeech = nil
             if let system { try? await system.stop() }
             for name in [micName, computerName] { try? FileManager.default.removeItem(at: directory.appendingPathComponent(name)) }
             throw error
@@ -115,8 +116,11 @@ import CoreMedia
         tick(); timer?.invalidate(); timer = nil
         await microphone?.stop(); voicedDuration = microphone?.voicedDuration ?? 0; microphone = nil
         if let computer { do { try await computer.stop() } catch { failure = error.localizedDescription } }
-        if let live, await live.stop(), !(voicedDuration > 10 && Double(liveWords) < voicedDuration * 0.5) { completedFiles.append(micName) }
-        if let computerSpeech, await computerSpeech.stop() { completedFiles.append(computerName) }
+        let micSpeech = live; let systemSpeech = computerSpeech
+        async let microphoneDone = micSpeech?.stop()
+        async let computerDone = systemSpeech?.stop()
+        if await microphoneDone == true, !(voicedDuration > 10 && Double(liveWords) < voicedDuration * 0.5) { completedFiles.append(micName) }
+        if await computerDone == true { completedFiles.append(computerName) }
         // An idle source may deliver no buffers at all. Never hand a missing file to transcription.
         if let computer, !computer.hasFrames { files.removeAll { $0 == computerName }; completedFiles.removeAll { $0 == computerName } }
         diagnostics = "Input: \(inputName). Duration: \(Int(elapsed))s. Microphone signal: \(Int(voicedDuration))s. Microphone words: \(liveWords). Computer: \(computerEnabled ? computerStatus : "Off")."

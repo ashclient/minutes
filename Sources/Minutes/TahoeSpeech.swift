@@ -79,14 +79,18 @@ struct CapturedPCM: @unchecked Sendable { let buffer: AVAudioPCMBuffer }
         feed.disconnectModern(); continuation?.finish(); continuation = nil
         guard let analyzer else { return false }
         do {
-            try await pump?.value
-            try await analyzer.finalizeAndFinishThroughEndOfInput()
-            try await results?.value
+            let result = await AsyncDeadline.run(seconds: 15) { [self] in
+                try await pump?.value
+                try await analyzer.finalizeAndFinishThroughEndOfInput()
+                try await results?.value
+            }
+            guard let result else { throw AppFailure("Live speech did not finish in time. Saved audio will be transcribed instead.") }
+            _ = try result.get()
             publish(); onText = nil
             return failure == nil
         } catch {
             failure = error.localizedDescription
-            await analyzer.cancelAndFinishNow()
+            Task { await analyzer.cancelAndFinishNow() }
             results?.cancel(); publish(); onText = nil
             return false
         }

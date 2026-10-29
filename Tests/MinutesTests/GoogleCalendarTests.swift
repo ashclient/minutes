@@ -2,6 +2,17 @@ import XCTest
 @testable import Minutes
 
 final class GoogleCalendarTests: XCTestCase {
+    @MainActor func testDeadlineReturnsWithoutWaitingForStalledWork() async throws {
+        let quick = await AsyncDeadline.run(seconds: 1) { 42 }
+        XCTAssertEqual(try quick?.get(), 42)
+        let start = Date()
+        let late: Result<Int, Error>? = await AsyncDeadline.run(seconds: 0.02) {
+            // An OS completion callback can ignore task cancellation.
+            await withCheckedContinuation { c in DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { c.resume(returning: 9) } }
+        }
+        XCTAssertNil(late)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.2)
+    }
     func testPKCEAndAuthorizationUseReadonlyScopesAndLoopback() throws {
         let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
         XCTAssertEqual(GoogleOAuth.challenge(verifier), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
