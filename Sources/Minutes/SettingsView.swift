@@ -29,7 +29,7 @@ import AppKit
             providerButton("Apple Intelligence", detail: "Experimental · on this Mac · no API key", selected: provider == "apple") { if apple.available { provider = "apple" } }.disabled(!apple.available || saving)
             HStack(alignment: .top) { Text(apple.message).font(.caption).foregroundStyle(.secondary); Spacer(); Button("Check again") { apple = AppleAIAvailability.current }.font(.caption) }
             if provider == "apple" {
-                Text("Reads compact evidence, writes one whole-lecture draft, then refines its topics. Uses Apple’s local model; it does not automate Siri.").font(.callout).foregroundStyle(.secondary)
+                Text("Keeps evidence for each topic, writes connected notes, then checks complete topics. Uses Apple’s local model; it does not automate Siri.").font(.callout).foregroundStyle(.secondary)
                 Toggle("Collaborative topic editing", isOn: $appleCollaborativeEditing)
                 Picker("On-device workers", selection: $appleNoteWorkers) {
                     ForEach(1...4, id: \.self) { Text(String($0)).tag($0) }

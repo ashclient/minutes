@@ -1,10 +1,12 @@
-# Minutes 2.7.0
+# Minutes 2.7.1
 
-- Cloud generation now shows a moving activity bar during requests, instead of sitting at 0%. Unknown output length is not presented as a percentage or time estimate.
-- Apple collects compact evidence internally, combines related concepts, then writes one whole-lecture draft for every length. It no longer fills the document with a separate set of notes for every source chunk.
-- Added optional collaborative topic editing with 1–4 independent local model sessions (default: 2). Settings → General → Apple Intelligence controls the worker count and editing pass. Active workers and topic markers show where real requests are running.
-- Editors own distinct topic sections, keep source excerpts beside the draft, remove repetition, and clarify supported details. Auto/Brief/Detailed sections cannot grow beyond their initial draft budget. A topic too large for safe local editing is preserved unchanged.
-- Mid-document additions, replacements and deletions now animate at the changed location while retaining untouched text. Removed text appears briefly with strikethrough. Reduce Motion applies edits immediately.
-- Cancellation keeps the previous saved notes and still offers keep partial / revert. Worker labels clear when work stops; editor metadata is never exported to Notion.
+Fixes two destructive local-generation behaviors in 2.7.0:
 
-Apple's small local context still requires chunking internally. More sessions share the same hardware and may be queued by macOS; four workers are not a promise of faster generation. Native CI exercises the full orchestration with synthetic inference; real Apple inference needs an eligible macOS 27 Mac.
+- Removed recursive whole-lecture compression into one 2,400-byte extract. Full evidence cards are retained in a ledger; a separate topic plan groups their IDs. Unknown, duplicate, omitted or malformed planner output cannot discard cards. Topic writers visit every retained evidence batch.
+- Removed local word-count clipping. Length is requested through semantic selection and rewriting, rather than deleting whole lines from a response. Brief and Detailed are approximate targets; a complete topic is preferred to an artificially cut fragment.
+- Incomplete topic output gets one bounded repair attempt. Dangling headings/labels/colon endings, unbalanced math/formatting and recognizable fabricated qualitative equations fail structural checks. These are safeguards, not a general fact checker.
+- Editors that return incomplete or severely reduced content are rejected; the last complete topic remains intact. Source-backed corrections still require inference and can be imperfect.
+- Topic writing now uses the existing 1–4 local worker slots, stable section IDs and tracked edit presentation. An optional verification pass checks complete topics using source excerpts.
+- Source excerpt retrieval computes relevance once per passage rather than repeatedly while sorting.
+
+Regression coverage includes a long synthetic multi-topic source with markers from every passage, deliberately omitted planner IDs, malformed planner output, incomplete editor replies and complete evidence-batch retention. Live Apple quality on the reported 62-minute lecture has not been verified without its original transcript and an eligible Mac.

@@ -10,16 +10,16 @@ import XCTest
         defer { active -= 1 }
         try await Task.sleep(nanoseconds: 3_000_000)
         let result: String
-        if key.hasPrefix("evidence") {
-            result = "INTERNAL_EVIDENCE_ONLY: A condition determines when revenue is recognized."
-        } else if key.hasPrefix("reduce") {
-            result = "A condition determines when revenue is recognized."
-        } else if key.hasPrefix("global") {
-            evidenceFinished = true
+        if key.hasPrefix("ledger") {
             result = "## Recognition\n- Recognize revenue when the required condition is met.\n\n## Allocation\n- Allocate the price by relative standalone values."
+        } else if key.hasPrefix("plan") {
+            result = "{\"topics\":[{\"title\":\"Recognition\",\"ids\":[0,2,4,6,8,10,12]},{\"title\":\"Allocation\",\"ids\":[1,3,5,7,9,11,13]}]}"
+        } else if key.hasPrefix("write") {
+            evidenceFinished = true
+            result = instruction.contains("topic “Recognition”") ? "## Recognition\n- Recognize revenue when the required condition is met." : "## Allocation\n- Allocate the price by relative standalone values."
         } else {
             XCTAssertTrue(text.contains("RELEVANT ORIGINAL SOURCE"))
-            result = text.contains("TOPIC DRAFT:\n## Recognition") ? "## Recognition\n- Recognize revenue when the condition is met." : "## Allocation\n- Allocate by relative standalone values."
+            result = text.contains("COMPLETE TOPIC DRAFT:\n## Recognition") ? "## Recognition\n- Recognize revenue when the condition is met." : "## Allocation\n- Allocate by relative standalone values."
         }
         partial(String(result.prefix(result.count / 2)))
         try await Task.sleep(nanoseconds: 3_000_000)
@@ -27,13 +27,15 @@ import XCTest
     }
 }
 final class CollaborativeEditingTests: XCTestCase {
-    @MainActor func testAppleBuildsOneGlobalDraftAndPublishesDisjointLiveTopicEdits() async throws {
+    @MainActor func testAppleRetainsEvidenceAndPublishesDisjointLiveTopicEdits() async throws {
         let model = SyntheticAppleInference()
         var snapshots: [[LiveNoteSection]] = [], text: [String] = [], activity: [[NoteWorker]] = [], fractions: [Double] = []
         let result = try await AppleNotesAI.compose(String(repeating: "Revenue is recognized when the stated condition is met. Allocation uses standalone values.\n", count: 120), length: .auto, format: .outline, workers: 4, editing: true, infer: model, fraction: { fractions.append($0) }, partial: { text.append($0) }, activity: { activity.append($0) }, sections: { snapshots.append($0) })
         XCTAssertTrue(model.evidenceFinished)
-        XCTAssertEqual(model.keys.filter { $0.hasPrefix("global") }.count, 1)
+        XCTAssertEqual(model.keys.filter { $0.hasPrefix("plan") }.count, 1)
         XCTAssertEqual(model.keys.filter { $0.hasPrefix("editor") }.count, 2)
+        XCTAssertEqual(model.keys.filter { $0.hasPrefix("write") }.count, 2)
+        XCTAssertFalse(model.keys.contains { $0.hasPrefix("reduce") })
         XCTAssertLessThanOrEqual(model.maximum, 4); XCTAssertGreaterThan(model.maximum, 1)
         XCTAssertFalse(text.contains { $0.contains("INTERNAL_EVIDENCE_ONLY") })
         XCTAssertTrue(snapshots.contains { $0.filter { $0.worker != nil }.count == 2 })
@@ -70,7 +72,7 @@ final class CollaborativeEditingTests: XCTestCase {
         for length in NotesLength.allCases {
             let model = SyntheticAppleInference()
             _ = try await AppleNotesAI.compose("A source condition and relative standalone prices.", length: length, format: .outline, workers: 1, editing: false, infer: model)
-            XCTAssertEqual(model.maximum, 1); XCTAssertEqual(model.keys.filter { $0.hasPrefix("global") }.count, 1)
+            XCTAssertEqual(model.maximum, 1); XCTAssertEqual(model.keys.filter { $0.hasPrefix("plan") }.count, 1)
             XCTAssertFalse(model.keys.contains { $0.hasPrefix("editor") })
         }
     }

@@ -6,7 +6,7 @@ enum NotesLength: String, Codable, Sendable, CaseIterable, Identifiable {
     var title: String { switch self { case .auto: return "Auto"; case .brief: return "Brief"; case .detailed: return "Detailed"; case .complete: return "Full detail" } }
     var explanation: String { switch self {
     case .auto: return "Personal class notes: clear explanations, useful examples, and a length that fits the material."
-    case .brief: return "Main topics and essential definitions. Up to 300 words for the entire lecture."
+    case .brief: return "Main topics and essential definitions. About 300 words for the entire lecture."
     case .detailed: return "Main topics, explanations, and selected examples. Up to 900 words total."
     case .complete: return "Thorough study notes: combine related ideas, retain explanations and worked examples, remove repetition."
     } }
