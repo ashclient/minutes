@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
     @EnvironmentObject var pipeline: MeetingPipeline
     @EnvironmentObject var calendar: CalendarMeetings
     @ObservedObject private var notion = NotionSync.shared
-    @AppStorage("includeComputer") private var includeComputer = true
+    @AppStorage("includeComputer") private var includeComputer = false
     @State private var sidebar = true
     @State private var setup = false
     @State private var settingsTab = "General"
@@ -16,6 +16,8 @@ import UniformTypeIdentifiers
     @State private var editingID: UUID?
     @State private var draft = ""
     @State private var recordingsOpen = false
+    @State private var transcriptOpen = false
+    @State private var syncDelay: Task<Void, Never>?
     @State private var showAllEvents = false
     @State private var pane = "Notes"
     @State private var regenerate = false
@@ -45,14 +47,21 @@ import UniformTypeIdentifiers
             VStack(alignment: .leading, spacing: 16) {
                 Text("Edit AI notes").font(.headline)
                 TextEditor(text: $draft).font(.body).frame(minHeight: 300)
-                HStack { Button("Cancel") { editingID = nil }; Spacer(); Button("Save") { if let id = editingID { store.update(id) { $0.summary = draft; $0.actions = [] } }; editingID = nil }.keyboardShortcut(.defaultAction) }
+                HStack { Button("Cancel") { editingID = nil }; Spacer(); Button("Save") { if let id = editingID { store.update(id) { $0.summary = draft; $0.actions = [] }; if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await notion.sync(id: id, store: store) } } }; editingID = nil }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 560)
         }
         .confirmationDialog("Replace the AI notes?", isPresented: $regenerate) { Button("Generate again") { if let meeting { pipeline.resume(id: meeting.id, store: store, recorder: recorder) } } } message: { Text("Your own notes and transcript are kept.") }
         .confirmationDialog("Transcribe the recordings again?", isPresented: $transcribeAgain) { Button("Transcribe & make notes") { if let meeting { pipeline.retranscribe(id: meeting.id, store: store, recorder: recorder) } } } message: { Text("Apple will refresh the transcript from your saved audio.") }
         .confirmationDialog("Permanently delete this note and its recordings?", isPresented: Binding(get: { deletingID != nil }, set: { if !$0 { deletingID = nil } })) { Button("Delete permanently", role: .destructive) { if let id = deletingID { store.deleteForever(id) }; deletingID = nil } }
         .onChange(of: store.selectedID) { _, _ in pane = meeting?.summary.isEmpty == false ? "AI notes" : "Notes"; recordingsOpen = false }
-        .onAppear { pane = meeting?.summary.isEmpty == false ? "AI notes" : "Notes" }
+        .onChange(of: meeting?.notes) { _, _ in
+            syncDelay?.cancel()
+            guard let note = meeting, note.notionPageID != nil, UserDefaults.standard.bool(forKey: "notionAutoSync") else { return }
+            syncDelay = Task {
+                do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch { return }
+                await notion.sync(id: note.id, store: store)
+            }
+        }
         .alert("Minutes", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("OK") { store.error = nil } } message: { Text(store.error ?? "") }
     }
     private var sidebarView: some View {
@@ -67,7 +76,7 @@ import UniformTypeIdentifiers
                         if calendar.events.isEmpty { Text(calendar.message).font(.system(size: 11)).foregroundStyle(.secondary).padding(9) }
                         if calendar.events.count > 5 { Button(showAllEvents ? "Show less" : "View all events") { showAllEvents.toggle() }.font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(.secondary).padding(9) }
                     } else if !calendar.authorized && store.query.isEmpty {
-                        Button { openSettings("Connections") } label: { Label("Connect your calendar", systemImage: "calendar.badge.plus").font(.system(size: 11)).foregroundStyle(.secondary).padding(.vertical, 16).padding(.horizontal, 8) }.buttonStyle(.plain)
+                        Button { openSettings("Connections") } label: { Label("Connect Google Calendar", systemImage: "calendar.badge.plus").font(.system(size: 11)).foregroundStyle(.secondary).padding(.vertical, 16).padding(.horizontal, 8) }.buttonStyle(.plain)
                     }
                     HStack {
                         sectionLabel(store.filter == "Trash" ? "Trash" : store.filter == "Favorites" ? "Favorites" : "Your notes"); Spacer()
@@ -113,7 +122,7 @@ import UniformTypeIdentifiers
                 Menu {
                     Button("Export notes…") { store.export(meeting) }
                     Button(meeting.favorite ? "Remove favorite" : "Favorite") { store.update(meeting.id) { $0.favorite.toggle() } }
-                    Button("Details & transcript…") { detailsID = meeting.id }
+                    Button("Manage recordings…") { detailsID = meeting.id }
                     if !meeting.audioFiles.isEmpty { Button("Transcribe again…") { transcribeAgain = true }.disabled(!processingAvailable) }
                     if !meeting.summary.isEmpty { Button("Generate again…") { regenerate = true }.disabled(!processingAvailable) }
                     Button("Sync to Notion") { sync(meeting.id) }
@@ -124,39 +133,52 @@ import UniformTypeIdentifiers
         }.buttonStyle(.plain).foregroundStyle(.secondary).padding(.horizontal, 24).frame(height: 53)
     }
     private func document(_ note: Meeting) -> some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 24) {
             if note.trashed { HStack { Text("This note is in Trash."); Spacer(); Button("Restore") { store.update(note.id) { $0.trashed = false } } }.font(.caption).padding(12).background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8)) }
             VStack(alignment: .leading, spacing: 12) {
-                TextField("Untitled meeting", text: Binding(get: { meeting?.title ?? "" }, set: { value in store.update(note.id) { $0.title = value } })).textFieldStyle(.plain).font(.system(size: 30, weight: .semibold))
-                HStack(spacing: 8) { if note.eventStart != nil { Image(systemName: "calendar").font(.system(size: 11)) }; Text((note.eventStart ?? note.createdAt).formatted(date: .abbreviated, time: .shortened)); Text("·"); Text(store.saveState); Spacer() }.font(.system(size: 11)).foregroundStyle(.tertiary)
+                TextField("Untitled meeting", text: Binding(get: { meeting?.title ?? "" }, set: { value in store.update(note.id) { $0.title = value } })).textFieldStyle(.plain).font(.system(size: 28, weight: .semibold))
+                HStack(spacing: 8) {
+                    Image(systemName: note.eventStart == nil ? "note.text" : "calendar")
+                    Text((note.eventStart ?? note.createdAt).formatted(date: .abbreviated, time: .shortened))
+                    Text("·"); Text(store.saveState)
+                }.font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            if recordingSelected { Label("Recording this meeting. You can keep writing below.", systemImage: "record.circle").font(.system(size: 12)).foregroundStyle(.secondary) }
+            if processingSelected { HStack { ProgressView().controlSize(.small); Text(pipeline.message).font(.system(size: 12)).foregroundStyle(.secondary) } }
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Your notes").font(.system(size: 13, weight: .semibold))
+                ZStack(alignment: .topLeading) {
+                    if note.notes.isEmpty { Text("Write questions, reminders, or anything you want to keep…").font(.system(size: 14)).foregroundStyle(.tertiary).padding(.top, 8).padding(.leading, 5).allowsHitTesting(false) }
+                    TextEditor(text: Binding(get: { meeting?.notes ?? "" }, set: { value in store.update(note.id) { $0.notes = value } })).font(.system(size: 14)).lineSpacing(6).scrollContentBackground(.hidden).frame(minHeight: note.summary.isEmpty ? 220 : 130)
+                }
+            }
+            if !note.summary.isEmpty {
+                Divider()
+                HStack {
+                    Text("Meeting notes").font(.system(size: 14, weight: .semibold)); Spacer()
+                    Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(note.finishedNotes, forType: .string) } label: { Label("Copy", systemImage: "doc.on.doc") }
+                    Button { draft = note.finishedNotes; editingID = note.id } label: { Label("Edit", systemImage: "pencil") }.disabled(processingSelected)
+                }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary)
+                NoteDocument(text: note.finishedNotes)
             }
             if !note.audioFiles.isEmpty { recordings(note) }
-            HStack(spacing: 24) {
-                ForEach(["Notes", "AI notes", "Transcript"], id: \.self) { label in
-                    Button { pane = label } label: { VStack(spacing: 10) { Text(label).font(.system(size: 12, weight: pane == label ? .medium : .regular)).foregroundStyle(pane == label ? Color.primary : Color.secondary); Capsule().fill(pane == label ? Color.primary : .clear).frame(height: 2) }.fixedSize(horizontal: true, vertical: false) }.buttonStyle(.plain)
-                }; Spacer()
-                if pane == "AI notes" && !note.summary.isEmpty {
-                    Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(note.finishedNotes, forType: .string) } label: { Image(systemName: "doc.on.doc") }.help("Copy notes")
-                    Button { draft = note.finishedNotes; editingID = note.id } label: { Image(systemName: "pencil") }.help("Edit AI notes").disabled(processingSelected)
-                }
-            }.buttonStyle(.plain).foregroundStyle(.secondary).overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 1).offset(y: 1) }
-            if pane == "Notes" {
-                ZStack(alignment: .topLeading) {
-                    if note.notes.isEmpty { Text("Write anything you’d like to remember…").font(.system(size: 14)).foregroundStyle(.tertiary).padding(.top, 8).padding(.leading, 5).allowsHitTesting(false) }
-                    TextEditor(text: Binding(get: { meeting?.notes ?? "" }, set: { value in store.update(note.id) { $0.notes = value } })).font(.system(size: 14)).lineSpacing(7).scrollContentBackground(.hidden).frame(minHeight: 340)
-                }
-            } else if pane == "AI notes" {
-                if !note.summary.isEmpty { NoteDocument(text: note.finishedNotes) }
-                else { emptyPane(recordingSelected ? "Notes come together after the meeting." : "Turn your conversation into clear notes.", detail: "Your transcript and anything you write are included.") }
-            } else {
-                VStack(alignment: .leading, spacing: 20) {
-                    if note.transcript.isEmpty { emptyPane(recordingSelected ? "Listening to your conversation…" : "Your transcript will appear here.", detail: recordingSelected ? "Microphone and computer audio are labeled separately." : "Start a recording, import audio, or paste a transcript in Details.") }
-                    ForEach(note.transcript) { line in VStack(alignment: .leading, spacing: 7) { HStack(spacing: 6) { Text(line.source).fontWeight(.medium); Text(line.timestamp).monospacedDigit().foregroundStyle(.tertiary) }.font(.system(size: 11)).foregroundStyle(.secondary); Text(line.text).font(.system(size: 14)).lineSpacing(5).textSelection(.enabled) }.frame(maxWidth: .infinity, alignment: .leading) }
-                }
+            if !note.transcript.isEmpty || recordingSelected {
+                DisclosureGroup("Transcript", isExpanded: $transcriptOpen) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        if note.transcript.isEmpty { Text("Listening…").font(.callout).foregroundStyle(.secondary) }
+                        ForEach(note.transcript) { line in
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(spacing: 6) { Text(line.source).fontWeight(.medium); Text(line.timestamp).monospacedDigit().foregroundStyle(.tertiary) }.font(.system(size: 11)).foregroundStyle(.secondary)
+                                Text(line.text).font(.system(size: 14)).lineSpacing(5).textSelection(.enabled)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }.padding(.top, 14)
+                }.font(.system(size: 12, weight: .medium))
             }
             if !protected(note.id) { recovery(note) }
-            if let error = note.notionError { HStack(alignment: .top) { Text(error).font(.caption).foregroundStyle(.secondary); Spacer(); Button("Retry sync") { sync(note.id) }.font(.caption) } }
-            if notion.syncing.contains(note.id) { Label("Syncing to Notion…", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary) }
+            if let error = note.notionError { HStack(alignment: .top) { Text(error).font(.caption).foregroundStyle(.secondary); Spacer(); Button("Retry Notion") { sync(note.id) }.font(.caption) } }
+            if notion.syncing.contains(note.id) { Label("Saving to Notion…", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary) }
+            else if let date = note.notionSyncedAt { Text("Saved to Notion · " + date.formatted(date: .omitted, time: .shortened)).font(.system(size: 10)).foregroundStyle(.tertiary) }
         }.padding(.horizontal, 40).padding(.top, 28).padding(.bottom, 48).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .center)
     }
     private func recordings(_ note: Meeting) -> some View {
@@ -172,9 +194,9 @@ import UniformTypeIdentifiers
     private var welcome: some View {
         VStack(spacing: 14) {
             Image(systemName: "waveform").font(.system(size: 24, weight: .light)).foregroundStyle(.secondary).padding(.bottom, 8)
-            Text("Room for every conversation.").font(.system(size: 26, weight: .medium))
-            Text("Pick a meeting on the left, or start with a blank note.").font(.system(size: 13)).foregroundStyle(.secondary)
-            HStack(spacing: 12) { Button("New note") { store.create() }; Button("Import audio…", action: importAudio) }.controlSize(.large).padding(.top, 12)
+            Text("Start with a meeting.").font(.system(size: 26, weight: .medium))
+            Text("Choose a Google Calendar event, write or record, then finish.\nMinutes saves the notes to its linked Notion page.").multilineTextAlignment(.center).font(.system(size: 13)).foregroundStyle(.secondary)
+            HStack(spacing: 12) { Button(calendar.authorized ? "Refresh Google meetings" : "Connect Google Calendar") { if calendar.authorized { calendar.refresh() } else { openSettings("Connections") } }; Button("Blank note") { store.create() } }.controlSize(.large).padding(.top, 12)
         }.frame(maxWidth: .infinity).padding(.horizontal, 20).padding(.top, 140)
     }
     private var footer: some View {
@@ -190,7 +212,7 @@ import UniformTypeIdentifiers
                 HStack(spacing: 12) {
                     Menu { Toggle("Include computer audio", isOn: $includeComputer); Divider(); Button("Import audio…", action: importAudio); Button("Import notes…") { store.importText() } } label: { Label(includeComputer ? "Mic + computer" : "Microphone", systemImage: includeComputer ? "speaker.wave.2" : "mic").font(.system(size: 11)) }.menuStyle(.borderlessButton).fixedSize().foregroundStyle(.secondary)
                     Spacer()
-                    Button { pipeline.start(store: store, recorder: recorder) } label: { Label(meeting?.audioFiles.isEmpty == false ? "New recording" : "Record meeting", systemImage: "mic.fill").font(.system(size: 12, weight: .medium)).padding(.horizontal, 14).padding(.vertical, 10).foregroundStyle(Color(nsColor: .textBackgroundColor)).background(Color.primary, in: Capsule()) }.buttonStyle(.plain).keyboardShortcut("r", modifiers: [.command, .shift])
+                    Button { pipeline.start(store: store, recorder: recorder) } label: { Label("Record this meeting", systemImage: "mic.fill").font(.system(size: 12, weight: .medium)).padding(.horizontal, 14).padding(.vertical, 10).foregroundStyle(Color(nsColor: .textBackgroundColor)).background(Color.primary, in: Capsule()) }.buttonStyle(.plain).keyboardShortcut("r", modifiers: [.command, .shift])
                 }
             }
         }.padding(16).frame(maxWidth: 740).background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 14)).overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.07))).padding(.horizontal, 28).padding(.bottom, 20)
@@ -200,7 +222,7 @@ import UniformTypeIdentifiers
     }
     @ViewBuilder private func recovery(_ note: Meeting) -> some View {
         if note.pipelineStatus == "needsKey" { HStack { Text("Transcript saved. Connect AI for a summary.").font(.caption).foregroundStyle(.secondary); Spacer(); Button("Connect AI") { openSettings("General") }.font(.caption) } }
-        else if ["failed", "paused"].contains(note.pipelineStatus ?? "") { VStack(alignment: .leading, spacing: 10) { Text(note.pipelineError ?? "Your recording is saved.").font(.callout).foregroundStyle(.secondary); Button("Retry") { pipeline.resume(id: note.id, store: store, recorder: recorder) }.disabled(!processingAvailable) }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8)) }
+        else if ["failed", "paused"].contains(note.pipelineStatus ?? "") { VStack(alignment: .leading, spacing: 10) { Text(note.pipelineError ?? "Your recording is saved.").font(.callout).foregroundStyle(.secondary); Button("Finish notes") { pipeline.resume(id: note.id, store: store, recorder: recorder) }.disabled(!processingAvailable) }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8)) }
         else if note.summary.isEmpty && (!note.audioFiles.isEmpty || !note.transcript.isEmpty || !note.notes.isEmpty) { Button("Make AI notes") { pipeline.resume(id: note.id, store: store, recorder: recorder) }.disabled(!processingAvailable) }
     }
     private func emptyPane(_ title: String, detail: String) -> some View { VStack(alignment: .leading, spacing: 8) { Text(title).font(.system(size: 14)); Text(detail).font(.system(size: 12)).foregroundStyle(.secondary) }.padding(.vertical, 18) }

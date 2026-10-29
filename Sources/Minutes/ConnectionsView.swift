@@ -24,27 +24,35 @@ import AppKit
     @State private var message = ""
     @State private var error = false
     @State private var showCalendars = false
+    @State private var googleSetup = false
     @State private var connectionExpanded = false
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack { Text("Connections").font(.title3).fontWeight(.semibold); Spacer(); Button("Done") { dismiss() } }
-            Label("Calendar", systemImage: "calendar").font(.system(size: 14, weight: .semibold))
-            Text("See upcoming meetings and open a note with the event’s name. Uses the calendars already synced to macOS Calendar, including Google and iCloud.").font(.callout).foregroundStyle(.secondary)
+            Label("Google Calendar", systemImage: "calendar").font(.system(size: 14, weight: .semibold))
+            Text("Connect the Google account you use in Notion Calendar. Click a meeting in the sidebar to open its note.").font(.callout).foregroundStyle(.secondary)
             HStack {
-                Button(calendar.authorized ? "Refresh events" : "Connect calendar") { Task { if calendar.authorized { calendar.refresh() } else { await calendar.connect() } } }
-                if calendar.authorized { Button("Disconnect") { calendar.disconnect() }.buttonStyle(.plain).foregroundStyle(.secondary) }
-                Spacer()
-                Button("Calendar accounts…") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preferences.internetaccounts")!) }.font(.caption)
+                Button(calendar.signingIn ? "Waiting for Google…" : calendar.authorized ? "Reconnect Google" : "Connect Google") { Task { await calendar.connect() } }.disabled(calendar.signingIn || !calendar.configured)
+                if calendar.signingIn { Button("Cancel") { calendar.cancelSignIn() } }
+                if calendar.authorized { Button("Refresh") { calendar.refresh() }.disabled(calendar.refreshing); Button("Disconnect") { calendar.disconnect() }.buttonStyle(.plain).foregroundStyle(.secondary) }
             }
             Text(calendar.message).font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup(calendar.configured ? "Google app setup" : "Set up Google sign-in once", isExpanded: $googleSetup) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("This private build needs a Google Desktop OAuth client. Enable the Google Calendar API in your Google Cloud project, configure the consent screen with your account as a test user, then create a Desktop app OAuth client and download its JSON file.").font(.caption).foregroundStyle(.secondary)
+                    Link("Google OAuth clients ↗", destination: URL(string: "https://console.cloud.google.com/auth/clients")!).font(.caption)
+                    Button("Import Google client JSON…") { importGoogleClient() }
+                    Text("Sign-in opens your browser. Calendar access is read-only. Credentials and tokens stay in macOS Keychain.").font(.caption).foregroundStyle(.secondary)
+                }.padding(.top, 8)
+            }.font(.caption)
             if calendar.authorized {
-                DisclosureGroup("Choose calendars", isExpanded: $showCalendars) {
+                DisclosureGroup("Choose Google calendars", isExpanded: $showCalendars) {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(calendar.calendars, id: \.id) { item in
-                            Toggle(item.title, isOn: Binding(get: { !(UserDefaults.standard.stringArray(forKey: "hiddenCalendars") ?? []).contains(item.id) }, set: { value in
-                                var hidden = Set(UserDefaults.standard.stringArray(forKey: "hiddenCalendars") ?? [])
+                            Toggle(item.title, isOn: Binding(get: { !(UserDefaults.standard.stringArray(forKey: "hiddenGoogleCalendars") ?? []).contains(item.id) }, set: { value in
+                                var hidden = Set(UserDefaults.standard.stringArray(forKey: "hiddenGoogleCalendars") ?? [])
                                 if value { hidden.remove(item.id) } else { hidden.insert(item.id) }
-                                UserDefaults.standard.set(Array(hidden), forKey: "hiddenCalendars"); calendar.refresh()
+                                UserDefaults.standard.set(Array(hidden), forKey: "hiddenGoogleCalendars"); calendar.refresh()
                             }))
                         }
                     }.padding(.top, 8)
@@ -52,7 +60,7 @@ import AppKit
             }
             Divider().padding(.vertical, 4)
             Label("Notion", systemImage: "square.stack").font(.system(size: 14, weight: .semibold))
-            Text("Each meeting you open can have a dated Notion page. Minutes syncs your notes and summary after recording.").font(.callout).foregroundStyle(.secondary)
+            Text("Choose a Notion page to keep your meeting notes in. Clicking a calendar event creates one child page named after that event, with a date mention. Finishing the meeting updates that same page.").font(.callout).foregroundStyle(.secondary)
             if notionEnabled { Label("Connected", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green) }
             DisclosureGroup(notionEnabled ? "Change connection" : "Set up Notion", isExpanded: Binding(get: { !notionEnabled || connectionExpanded }, set: { connectionExpanded = $0 })) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -60,21 +68,27 @@ import AppKit
                     Link("Create a Notion connection ↗", destination: URL(string: "https://www.notion.so/profile/integrations")!).font(.caption)
                     SecureField(notionEnabled ? "New secret (leave blank to keep saved key)" : "Notion connection secret", text: $token).textFieldStyle(.roundedBorder)
                     Text("2. Open the parent page or database in Notion → ••• → Connections → add your connection. Copy its link below.").font(.caption).foregroundStyle(.secondary)
-                    Picker("Destination", selection: $existing) { Text("Create a Minutes database in a page").tag(false); Text("Use an existing database").tag(true) }.font(.caption)
-                    TextField(existing ? "Notion database link" : "Parent Notion page link", text: $destination).textFieldStyle(.roundedBorder)
+                    Picker("Destination", selection: $existing) { Text("A Notion parent page").tag(false); Text("Use an existing database").tag(true) }.font(.caption)
+                    TextField(existing ? "Notion database link" : "Notion parent page link", text: $destination).textFieldStyle(.roundedBorder)
                     Button(working ? "Connecting…" : notionEnabled ? "Update connection" : "Connect Notion") { Task { await connectNotion() } }.disabled(working || destination.isEmpty || (!notionEnabled && token.isEmpty))
                 }.padding(.top, 10)
             }
             if notionEnabled {
                 Toggle("Sync automatically after making notes", isOn: $autoSync).font(.callout)
                 Toggle("Include the transcript in Notion", isOn: $includeTranscript).font(.callout)
-                Text("Minutes replaces its own “Minutes notes” section on sync. Keep edits you make in Notion outside that section.").font(.caption).foregroundStyle(.secondary)
+                Text("Minutes updates its own meeting-notes section. Keep edits you make directly in Notion outside that section.").font(.caption).foregroundStyle(.secondary)
                 HStack { if let raw = UserDefaults.standard.string(forKey: "notionDatabaseURL"), let url = URL(string: raw) { Link("Open database ↗", destination: url) }; Spacer(); Button("Disconnect Notion") { do { try CloudKey.save("", service: "notion"); notionEnabled = false } catch { message = error.localizedDescription; self.error = true } } }.font(.caption)
             }
             if !message.isEmpty { Text(message).font(.caption).foregroundStyle(error ? Color.red : Color.secondary) }
-            Text("To see the dated pages in Notion Calendar, add the Minutes database there. Notion’s own upcoming-events sidebar and native AI meeting-note links are controlled by Notion.").font(.caption).foregroundStyle(.secondary)
-            Link("How to add a database to Notion Calendar ↗", destination: URL(string: "https://www.notion.com/help/use-notion-calendar-with-notion")!).font(.caption)
+            Text("Once connected: choose an event → write or record → finish the meeting. Open in Notion takes you to its saved page.").font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear { if !calendar.configured { googleSetup = true } }
+    }
+    private func importGoogleClient() {
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { try calendar.importClient(Data(contentsOf: url)); googleSetup = false }
+        catch { calendar.message = error.localizedDescription }
     }
     private func connectNotion() async {
         working = true; message = ""; error = false
@@ -88,10 +102,10 @@ import AppKit
                 let resolved = try await client.resolveDatabase(id)
                 defaults.set(resolved.source, forKey: "notionSource"); defaults.set(resolved.title, forKey: "notionTitleProperty"); defaults.set(resolved.date, forKey: "notionDateProperty"); defaults.set(resolved.url, forKey: "notionDatabaseURL")
             } else {
-                let created = try await client.createDatabase(parent: id)
-                defaults.set(created.source, forKey: "notionSource"); defaults.set("Name", forKey: "notionTitleProperty"); defaults.set("Date", forKey: "notionDateProperty"); defaults.set(created.url, forKey: "notionDatabaseURL")
-                destination = created.url; existing = true
+                _ = try await client.call("pages/" + id)
+                defaults.set(id, forKey: "notionParentPage")
             }
+            defaults.set(existing ? "database" : "page", forKey: "notionDestinationKind")
             if !key.isEmpty { try CloudKey.save(key, service: "notion") }
             defaults.set(destination, forKey: "notionDestination"); notionEnabled = true; token = ""
             message = "Connected. Click an upcoming meeting to create its linked page."

@@ -128,4 +128,9 @@ final class SpeechFeed: @unchecked Sendable {
         publish(); task?.cancel(); token = UUID(); onText = nil
         return !failed && ended
     }
+    func cancel() {
+        if #available(macOS 26.0, *), let modern = modern as? TahoeSpeech { modern.cancel(feed: feed); return }
+        stopped = true; timer?.invalidate(); timer = nil; transition?.cancel()
+        feed.detach(); task?.cancel(); token = UUID(); publish(); onText = nil
+    }
 }

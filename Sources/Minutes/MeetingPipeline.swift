@@ -31,15 +31,16 @@ import AVFoundation
     }
     func start(store: Store, recorder: Recorder) {
         guard !working, !recorder.recording else { return }
-        let draft = store.meetings.first { $0.id == store.selectedID && !$0.trashed && $0.audioFiles.isEmpty && $0.transcript.isEmpty && $0.summary.isEmpty }
+        let draft = store.meetings.first { $0.id == store.selectedID && !$0.trashed }
         guard let id = draft?.id ?? store.create() else { return }
         store.update(id) {
             if $0.title == "Untitled meeting" { $0.title = "Meeting · " + Date().formatted(date: .abbreviated, time: .shortened) }
-            $0.transcribedFiles = []
+            if $0.transcribedFiles == nil { $0.transcribedFiles = $0.transcript.isEmpty ? [] : $0.audioFiles }
         }
+        var offset = 0.0
         recorder.onLiveText = { lines, file in
             var tagged = lines
-            for i in tagged.indices { tagged[i].audioFile = file }
+            for i in tagged.indices { tagged[i].audioFile = file; tagged[i].seconds += offset }
             store.update(id) { meeting in
                 meeting.transcript.removeAll { $0.audioFile == file }
                 meeting.transcript += tagged
@@ -48,21 +49,29 @@ import AVFoundation
         }
         run(id: id, store: store, cancel: false) {
             self.state("starting", "Starting microphone…", id: id, store: store)
+            var durations: [String: Double] = [:]
+            for file in draft?.audioFiles ?? [] {
+                if let url = store.audioURL(file), let duration = try? await AVURLAsset(url: url).load(.duration).seconds, duration.isFinite {
+                    durations[Self.group(file)] = max(durations[Self.group(file)] ?? 0, duration)
+                }
+            }
+            offset = durations.values.reduce(0, +)
             try await recorder.start(id: id, directory: store.audio, includeComputer: UserDefaults.standard.bool(forKey: "includeComputer"))
-            store.update(id) { $0.audioFiles = recorder.files }
+            store.update(id) { $0.audioFiles += recorder.files.filter { !$0.isEmpty } }
             self.state("recording", "Recording", id: id, store: store)
         }
     }
     func stop(store: Store, recorder: Recorder) {
         guard !working, let id = recorder.meetingID else { return }
+        let requested = recorder.files
         run(id: id, store: store, cancel: false) {
             self.state("saving", "Saving recording…", id: id, store: store)
             _ = await recorder.stop()
             recorder.onLiveText = nil
             store.update(id) {
                 $0.audioDiagnostics = recorder.diagnostics
-                $0.audioFiles = recorder.files
-                $0.transcribedFiles = recorder.completedFiles
+                $0.audioFiles.removeAll { requested.contains($0) && !recorder.files.contains($0) }
+                $0.transcribedFiles = Array(Set(($0.transcribedFiles ?? []) + recorder.completedFiles))
             }
             store.saveNow()
             // Do not silently summarize an incomplete capture.
@@ -81,6 +90,20 @@ import AVFoundation
         resume(id: id, store: store, recorder: recorder)
     }
     func cancel() { if canCancel { work?.cancel() } }
+    func prepareForQuit(store: Store, recorder: Recorder) {
+        work?.cancel()
+        recorder.onLiveText = nil
+        for id in Set([activeID, recorder.meetingID].compactMap { $0 }) {
+            store.update(id) {
+                if recorder.meetingID == id {
+                    for file in recorder.files where !$0.audioFiles.contains(file) { $0.audioFiles.append(file) }
+                }
+                $0.pipelineStatus = "paused"
+                $0.pipelineError = "Saved when you quit. Finish notes whenever you’re ready."
+            }
+        }
+        store.saveNow()
+    }
 
     private func process(id: UUID, store: Store, recorder: Recorder) async throws {
         guard let snapshot = store.meetings.first(where: { $0.id == id }), !snapshot.trashed else { return }

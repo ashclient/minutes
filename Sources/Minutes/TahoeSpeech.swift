@@ -91,6 +91,11 @@ struct CapturedPCM: @unchecked Sendable { let buffer: AVAudioPCMBuffer }
             return false
         }
     }
+    func cancel(feed: SpeechFeed) {
+        feed.disconnectModern(); continuation?.finish(); continuation = nil
+        pump?.cancel(); results?.cancel(); publish(); onText = nil
+        if let analyzer { Task { await analyzer.cancelAndFinishNow() } }
+    }
     static func transcribe(url: URL, source: String, timeOffset: Double, progress: (String) -> Void, partial: @escaping ([TranscriptLine]) -> Void) async throws -> [TranscriptLine] {
         let session = TahoeSpeech()
         progress("Preparing Apple’s Tahoe transcription…")

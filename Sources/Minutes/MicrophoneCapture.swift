@@ -70,6 +70,7 @@ final class MicrophoneSink: @unchecked Sendable {
 }
 @MainActor final class MicrophoneCapture {
     private let engine = AVAudioEngine()
+    private var tapped = false
     private var sink: MicrophoneSink?
     func setGate(paused: Bool, muted: Bool) { sink?.setGate(paused: paused, muted: muted) }
     var voicedDuration: Double { sink?.voicedDuration ?? 0 }
@@ -83,11 +84,12 @@ final class MicrophoneSink: @unchecked Sendable {
         let sink = try MicrophoneSink(url: url, format: format, feed: feed)
         self.sink = sink
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in sink.append(buffer) }
+        tapped = true
         do { engine.prepare(); try engine.start() }
-        catch { input.removeTap(onBus: 0); throw error }
+        catch { input.removeTap(onBus: 0); tapped = false; throw error }
     }
     func stop() async {
-        engine.inputNode.removeTap(onBus: 0); engine.stop()
+        if tapped { engine.inputNode.removeTap(onBus: 0); tapped = false }; engine.stop()
         await sink?.finish()
     }
 }

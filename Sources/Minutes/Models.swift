@@ -37,6 +37,8 @@ struct Meeting: Identifiable, Codable, Equatable {
     var notionBlockID: String? = nil
     var notionSyncedAt: Date? = nil
     var notionError: String? = nil
+    var notionParentKind: String? = nil
+    var notionParentID: String? = nil
     var favorite = false
     var trashed = false
     var transcriptText: String { transcript.map { "[\($0.timestamp)] \($0.source): \($0.text)" }.joined(separator: "\n") }

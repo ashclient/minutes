@@ -8,6 +8,7 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
     private let queue = DispatchQueue(label: "Minutes.computer-audio", qos: .userInitiated)
     private let lock = NSLock()
     private var stream: SCStream?
+    @MainActor private var shutdown: Task<Void, Error>?
     private var sink: MicrophoneSink?
     private var destination: URL?
     private var feed: SpeechFeed?
@@ -63,7 +64,12 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
         } catch { fail(error.localizedDescription) }
     }
     func stream(_ stream: SCStream, didStopWithError error: Error) { fail(error.localizedDescription) }
-    func stop() async throws {
+    @MainActor func stop() async throws {
+        if let shutdown { return try await shutdown.value }
+        let task = Task { try await self.stopOnce() }; shutdown = task
+        try await task.value
+    }
+    private func stopOnce() async throws {
         var stopError: Error?
         do { try await stream?.stopCapture() } catch { stopError = error }
         stream = nil
@@ -74,3 +80,4 @@ final class ComputerAudio: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
         if let error = status.1 { throw AppFailure(error) }
     }
 }
+

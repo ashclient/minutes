@@ -73,7 +73,15 @@ struct NotionClient {
         let formatter = ISO8601DateFormatter()
         var time = ["start": formatter.string(from: meeting.eventStart ?? meeting.createdAt)]
         if let end = meeting.eventEnd { time["end"] = formatter.string(from: end) }
-        return [title: ["title": rich(String(meeting.title.prefix(200)))], date: ["date": time]]
+        return [title: ["title": pageTitle(meeting)], date: ["date": time]]
+    }
+    static func pageTitle(_ meeting: Meeting) -> [[String: Any]] {
+        var value = rich(String(meeting.title.prefix(200)))
+        if let start = meeting.eventStart {
+            value += rich(" ")
+            value.append(["type": "mention", "mention": ["type": "date", "date": ["start": ISO8601DateFormatter().string(from: start)]]])
+        }
+        return value
     }
 }
 
@@ -93,19 +101,22 @@ struct NotionClient {
             guard var meeting = store.meetings.first(where: { $0.id == id && !$0.trashed }) else { return }
             let client = NotionClient(token: try CloudKey.read(service: "notion"))
             let defaults = UserDefaults.standard
-            guard let source = defaults.string(forKey: "notionSource"), !source.isEmpty else { throw AppFailure("Connect a Notion destination in Connections.") }
-            let properties = NotionClient.properties(meeting, title: defaults.string(forKey: "notionTitleProperty") ?? "Name", date: defaults.string(forKey: "notionDateProperty") ?? "Date")
+            let pageParent = meeting.notionParentKind.map { $0 == "page" } ?? (meeting.notionPageID == nil && defaults.string(forKey: "notionDestinationKind") == "page")
+            let parentID = meeting.notionParentID ?? defaults.string(forKey: pageParent ? "notionParentPage" : "notionSource") ?? ""
+            guard !parentID.isEmpty else { throw AppFailure("Choose where meeting pages go in Connections.") }
+            let properties: [String: Any] = pageParent ? ["title": ["title": NotionClient.pageTitle(meeting)]] : NotionClient.properties(meeting, title: defaults.string(forKey: "notionTitleProperty") ?? "Name", date: defaults.string(forKey: "notionDateProperty") ?? "Date")
             if meeting.notionPageID == nil {
-                let response = try await client.call("pages", method: "POST", body: ["parent": ["type": "data_source_id", "data_source_id": source], "properties": properties])
+                let parent = pageParent ? ["type": "page_id", "page_id": parentID] : ["type": "data_source_id", "data_source_id": parentID]
+                let response = try await client.call("pages", method: "POST", body: ["parent": parent, "properties": properties])
                 guard let page = response["id"] as? String else { throw AppFailure("Notion did not return a page ID.") }
                 meeting.notionPageID = page
-                store.update(id) { $0.notionPageID = page; $0.notionURL = response["url"] as? String }
+                store.update(id) { $0.notionPageID = page; $0.notionURL = response["url"] as? String; $0.notionParentKind = pageParent ? "page" : "database"; $0.notionParentID = parentID }
                 store.saveNow() // Retain the page ID even if content upload is interrupted.
             } else {
                 _ = try await client.call("pages/" + meeting.notionPageID!, method: "PATCH", body: ["properties": properties])
             }
             let children = NotionClient.content(meeting, transcript: defaults.bool(forKey: "notionIncludeTranscript"))
-            let section: [String: Any] = ["object": "block", "type": "toggle", "toggle": ["rich_text": NotionClient.rich("Minutes notes"), "children": children]]
+            let section: [String: Any] = ["object": "block", "type": "quote", "quote": ["rich_text": NotionClient.rich("Meeting notes · synced from Minutes"), "children": children]]
             let body: [String: Any] = ["children": [section]]
             guard children.count <= 100, try JSONSerialization.data(withJSONObject: body).count < 480000 else { throw AppFailure("This note is too large for a single Notion sync. Turn off Include transcript, or export it as Markdown.") }
             let appended = try await client.call("blocks/" + meeting.notionPageID! + "/children", method: "PATCH", body: body)

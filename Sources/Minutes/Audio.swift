@@ -32,6 +32,7 @@ import CoreMedia
 
     func start(id: UUID, directory: URL, includeComputer: Bool) async throws {
         guard !recording else { return }
+        try Task.checkCancellation()
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
         guard granted else { throw AppFailure("Microphone access is off. Enable Minutes in System Settings → Privacy & Security → Microphone.") }
         paused = false; microphoneMuted = false; computerEnabled = includeComputer
@@ -44,6 +45,7 @@ import CoreMedia
         do {
             do {
                 try await microphoneSpeech.prepare()
+                try Task.checkCancellation()
                 try await microphoneSpeech.start { [weak self] lines in
                     guard let self else { return }
                     self.liveWords = lines.map(\.text).joined(separator: " ").split(whereSeparator: \.isWhitespace).count
@@ -51,6 +53,7 @@ import CoreMedia
                 }
                 live = microphoneSpeech; liveStatus = microphoneSpeech.status
             } catch { liveStatus = "Live microphone speech unavailable; saved audio will be transcribed after stopping." }
+            try Task.checkCancellation()
             if includeComputer {
                 let speech = LiveSpeech(source: "Computer")
                 do {
@@ -62,9 +65,10 @@ import CoreMedia
                 } catch { computerStatus = "Live computer speech unavailable; transcribing after stopping." }
                 let capture = ComputerAudio()
                 do { try await capture.start(url: directory.appendingPathComponent(computerName), feed: speech.feed) }
-                catch { throw AppFailure("Computer audio could not start: \(error.localizedDescription). Allow Minutes in macOS Privacy & Security → Screen & System Audio Recording, then try again.") }
+                catch { throw AppFailure("Computer audio could not start. " + error.localizedDescription) }
                 system = capture
             }
+            try Task.checkCancellation()
             try mic.start(url: directory.appendingPathComponent(micName), feed: microphoneSpeech.feed)
         } catch {
             if let live { _ = await live.stop() }; live = nil
@@ -119,6 +123,15 @@ import CoreMedia
         live = nil; computerSpeech = nil; computer = nil
         recording = false; paused = false; level = 0; computerLevel = 0; meetingID = nil
         return (id, files)
+    }
+    // Close audio without waiting for speech or AI. Saved tracks can be finished later.
+    func saveForQuit() async {
+        timer?.invalidate(); timer = nil
+        microphone?.setGate(paused: true, muted: microphoneMuted); computer?.setPaused(true)
+        live?.cancel(); computerSpeech?.cancel(); onLiveText = nil
+        await microphone?.stop(); microphone = nil
+        if let computer { try? await computer.stop() }
+        live = nil; computerSpeech = nil; computer = nil; recording = false
     }
 }
 

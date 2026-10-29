@@ -6,14 +6,14 @@ import AppKit
     @StateObject private var recorder = Recorder()
     @StateObject private var pipeline = MeetingPipeline()
     @StateObject private var calendar = CalendarMeetings()
-    init() { UserDefaults.standard.register(defaults: ["includeComputer": true, "notionAutoSync": true]) }
+    init() { UserDefaults.standard.register(defaults: ["includeComputer": false, "notionAutoSync": true]) }
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     var body: some Scene {
         Window("Minutes", id: "main") {
             WorkspaceView()
                 .environmentObject(store).environmentObject(recorder).environmentObject(pipeline).environmentObject(calendar)
                 .frame(minWidth: 850, minHeight: 560)
-                .onAppear { delegate.store = store; delegate.recorder = recorder; delegate.floating.configure(store: store, recorder: recorder, pipeline: pipeline) }
+                .onAppear { delegate.store = store; delegate.recorder = recorder; delegate.pipeline = pipeline; delegate.floating.configure(store: store, recorder: recorder, pipeline: pipeline) }
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1080, height: 760)
@@ -33,15 +33,21 @@ import AppKit
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var store: Store?
     weak var recorder: Recorder?
+    weak var pipeline: MeetingPipeline?
+    private var quitting = false
+    private var replied = false
     let floating = FloatingRecorder()
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if recorder?.recording == true {
-            let alert = NSAlert(); alert.messageText = "A meeting is recording"; alert.informativeText = "Stop and save the recording before quitting."; alert.addButton(withTitle: "Keep recording"); alert.runModal(); return .terminateCancel
-        }
-        if store?.busy == true {
-            let alert = NSAlert(); alert.messageText = "Work is still in progress"; alert.informativeText = "Wait for it to finish, or cancel it in the meeting before quitting."; alert.addButton(withTitle: "Return to Minutes"); alert.runModal(); return .terminateCancel
-        }
-        store?.saveNow(); return .terminateNow
+        guard !quitting else { return .terminateLater }
+        store?.saveNow()
+        guard recorder?.recording == true || store?.busy == true else { return .terminateNow }
+        quitting = true
+        if let store, let recorder { pipeline?.prepareForQuit(store: store, recorder: recorder) }
+        Task { [self] in await recorder?.saveForQuit(); finishQuit(sender) }
+        // A stalled OS service must not make Quit wait indefinitely.
+        Task { [self] in try? await Task.sleep(nanoseconds: 4_000_000_000); finishQuit(sender) }
+        return .terminateLater
     }
+    private func finishQuit(_ app: NSApplication) { guard !replied else { return }; replied = true; store?.saveNow(); app.reply(toApplicationShouldTerminate: true) }
 }

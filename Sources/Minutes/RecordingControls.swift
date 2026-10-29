@@ -17,12 +17,14 @@ import Combine
             if !compact { Spacer(minLength: 4) }
             control(recorder.microphoneMuted ? "mic.slash" : "mic", recorder.microphoneMuted ? "Unmute microphone" : "Mute microphone", active: recorder.microphoneMuted) { recorder.toggleMicrophone() }
             control(recorder.paused ? "play" : "pause", recorder.paused ? "Resume recording" : "Pause both audio sources", active: recorder.paused) { recorder.togglePause() }
-            Button { pipeline.stop(store: store, recorder: recorder) } label: { Image(systemName: "stop.fill").font(.system(size: 11)).frame(width: 30, height: 30).foregroundStyle(.white).background(Color.red.opacity(0.85), in: Circle()) }
+            Button { pipeline.stop(store: store, recorder: recorder) } label: {
+                HStack(spacing: 6) { Image(systemName: "stop.fill"); if !compact { Text("Finish meeting") } }.font(.system(size: 11, weight: .medium)).padding(.horizontal, compact ? 0 : 12).frame(minWidth: 30, minHeight: 30).foregroundStyle(.white).background(Color.red.opacity(0.85), in: Capsule())
+            }
                 .buttonStyle(.plain).help("Stop & make notes").accessibilityLabel("Stop & make notes")
         }.disabled(pipeline.working)
     }
     private func control(_ icon: String, _ help: String, active: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: icon).font(.system(size: 13)).frame(width: 30, height: 30).foregroundStyle(active ? Color.orange : Color.primary).background(active ? Color.orange.opacity(0.12) : Color.primary.opacity(0.04), in: Circle()) }.buttonStyle(.plain).help(help).accessibilityLabel(help)
+        Button(action: action) { HStack(spacing: 6) { Image(systemName: icon); if !compact { Text(icon.contains("mic") ? (active ? "Unmute" : "Mute") : (active ? "Resume" : "Pause")) } }.font(.system(size: 12)).padding(.horizontal, compact ? 0 : 10).frame(minWidth: 30, minHeight: 30).foregroundStyle(active ? Color.orange : Color.primary).background(active ? Color.orange.opacity(0.12) : Color.primary.opacity(0.04), in: Capsule()) }.buttonStyle(.plain).help(help).accessibilityLabel(help)
     }
 }
 
