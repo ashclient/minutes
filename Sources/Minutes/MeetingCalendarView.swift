@@ -24,7 +24,7 @@ enum CalendarLayout {
     private var dates: [Date] { CalendarLayout.gridDates(for: month) }
     private var weekdays: [String] { let c = Calendar.current; let names = c.shortStandaloneWeekdaySymbols; return (0..<7).map { names[($0 + c.firstWeekday - 1) % 7] } }
     var body: some View {
-        ScrollView {
+        GeometryReader { geometry in ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack {
                     Text(month.formatted(.dateTime.month(.wide).year())).font(.system(size: 25, weight: .semibold))
@@ -43,7 +43,7 @@ enum CalendarLayout {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) { ForEach(Array(weekdays.enumerated()), id: \.offset) { _, name in Text(name).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.bottom, 10) } }
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 1), count: 7), spacing: 1) {
-                        ForEach(dates, id: \.self) { date in day(date) }
+                        ForEach(dates, id: \.self) { date in day(date, height: max(64, (geometry.size.height - 180) / 6)) }
                     }.background(Color.primary.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 if !calendar.monthMessage.isEmpty { Text(calendar.monthMessage).font(.callout).foregroundStyle(.secondary) }
@@ -62,10 +62,10 @@ enum CalendarLayout {
                     }.buttonStyle(.plain)
                 }
             }.padding(28)
-        }.onAppear { calendar.loadMonth(month) }
+        } }.onAppear { calendar.loadMonth(month) }
     }
     private func move(_ amount: Int) { if let next = Calendar.current.date(byAdding: .month, value: amount, to: month) { month = next; selected = next; calendar.loadMonth(next) } }
-    private func day(_ date: Date) -> some View {
+    private func day(_ date: Date, height: CGFloat) -> some View {
         let events = visible.filter { CalendarLayout.contains($0, day: date) }
         let current = Calendar.current.isDate(date, equalTo: month, toGranularity: .month)
         let chosen = Calendar.current.isDate(date, inSameDayAs: selected)
@@ -78,6 +78,6 @@ enum CalendarLayout {
             }
             if events.count > 2 { Button("+\(events.count - 2) more") { selected = date }.font(.system(size: 9)).buttonStyle(.plain).foregroundStyle(.secondary) }
             Spacer(minLength: 0)
-        }.padding(6).frame(maxWidth: .infinity).frame(height: 98).background(chosen ? Color.accentColor.opacity(0.06) : Color(nsColor: .textBackgroundColor)).contentShape(Rectangle()).onTapGesture { selected = date }
+        }.padding(6).frame(maxWidth: .infinity).frame(height: height).background(chosen ? Color.accentColor.opacity(0.06) : Color(nsColor: .textBackgroundColor)).contentShape(Rectangle()).onTapGesture { selected = date }
     }
 }
