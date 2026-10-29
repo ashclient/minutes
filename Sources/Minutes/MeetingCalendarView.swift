@@ -36,7 +36,7 @@ enum CalendarMode: String, CaseIterable { case day = "Day", week = "Week", month
                 HStack {
                     Text(month.formatted(.dateTime.month(.wide).year())).font(.system(size: 25, weight: .semibold))
                     Spacer()
-                    Picker("Layout", selection: $mode) { ForEach(CalendarMode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.frame(width: 110)
+                    Picker("Layout", selection: $mode) { ForEach(CalendarMode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.labelsHidden().frame(width: 110)
                     if calendar.monthLoading { ProgressView().controlSize(.small) }
                     Button("Today") { month = Date(); selected = Date(); calendar.loadMonth(month) }
                     Button { move(-1) } label: { Image(systemName: "chevron.left") }.help("Previous period")
@@ -79,6 +79,7 @@ enum CalendarMode: String, CaseIterable { case day = "Day", week = "Week", month
         } }.onAppear {
             if let raw = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--calendar-layout=") }), let value = CalendarMode(rawValue: String(raw.dropFirst("--calendar-layout=".count))) { mode = value }
             calendar.loadMonth(month)
+            if ProcessInfo.processInfo.arguments.contains("--preview-calendar"), let first = calendar.monthEvents.first { selected = first.start }
         }
     }
     private func eventSubtitle(_ event: CalendarMeeting) -> String {
