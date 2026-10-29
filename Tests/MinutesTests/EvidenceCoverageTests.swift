@@ -58,6 +58,25 @@ final class EvidenceCoverageTests: XCTestCase {
         XCTAssertTrue(NoteQuality.hasQualitativeEquation(falseFormula))
         XCTAssertFalse(NoteQuality.hasQualitativeEquation("## Allocation\n$$\n360 / 600 * 480 = 288\n$$"))
     }
+    func testIncompleteResponsesCannotPoisonRetryCache() {
+        XCTAssertFalse(NoteQuality.cacheable("## Topic\nThe required event depends on:", tag: "write-v8"))
+        XCTAssertFalse(NoteQuality.cacheable("## Topic\n**Unfinished example**", tag: "editor-v8"))
+        XCTAssertTrue(NoteQuality.cacheable("## Topic\n- A complete definition with its necessary condition.", tag: "write-v8"))
+        XCTAssertTrue(NoteQuality.cacheable("{\"topics\":[]}", tag: "plan-v8"))
+        XCTAssertFalse(NoteQuality.cacheable("Unfinished JSON {", tag: "plan-v8"))
+    }
+    func testReviewerRepliesCannotRewriteTopicsAndPatchesAreLocalized() {
+        let original = "## Allocation\n- Total price is 480.\n- The first item receives 288.\n- The second item receives 192."
+        XCTAssertTrue(NoteSanityReview.issues("## Rewritten topic\nDifferent notes.", original: original).isEmpty)
+        let report = "{\"issues\":[{\"quote\":\"The first item receives 288.\",\"reason\":\"Check this amount against source.\"},{\"quote\":\"a fabricated quote\",\"reason\":\"Invalid.\"}]}"
+        let issue = NoteSanityReview.issues(report, original: original)
+        XCTAssertEqual(issue.count, 1)
+        let updated = NoteSanityReview.patched("{\"replacement\":\"The first item receives 280.\"}", issue: issue[0], original: original)
+        XCTAssertTrue(updated?.contains("Total price is 480.") == true)
+        XCTAssertTrue(updated?.contains("second item receives 192.") == true)
+        XCTAssertNil(NoteSanityReview.patched("## Rewritten document", issue: issue[0], original: original))
+        XCTAssertNil(NoteSanityReview.patched("{\"replacement\":\"\n## Another topic\nUnrelated\"}", issue: issue[0], original: original))
+    }
     func testInvalidEditorReplyPreservesLastCompleteTopicWithoutWordClipping() {
         let original = "## Inventory\n- The first purchase layer contains 20 units at 5 each.\n- The second layer contains 30 units at 6 each.\n- The method determines which complete layer costs are assigned."
         XCTAssertTrue(NoteQuality.complete(original))

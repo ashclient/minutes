@@ -100,7 +100,7 @@ struct CollaborativeNotesView: View {
             ForEach(sections) { section in
                 VStack(alignment: .leading, spacing: 6) {
                     if let worker = section.worker {
-                        Label("Agent \(worker) · refining this topic", systemImage: "pencil.tip")
+                        Label("Agent \(worker) · working on this topic", systemImage: "pencil.tip")
                             .font(.caption).foregroundStyle(NoteWorkersView.color(worker))
                     }
                     StreamingNotesView(text: section.text, running: running, initiallyVisible: true)

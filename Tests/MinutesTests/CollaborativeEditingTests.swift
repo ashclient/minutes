@@ -3,11 +3,14 @@ import XCTest
 
 @MainActor private final class SyntheticAppleInference: AppleNoteInference {
     var active = 0, maximum = 0
+    var writingActive = 0, maximumWriters = 0
     var keys: [String] = []
     var evidenceFinished = false
     func generate(_ text: String, instruction: String, tokens: Int, key: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
         keys.append(key); active += 1; maximum = max(maximum, active)
-        defer { active -= 1 }
+        let writes = key.hasPrefix("write") || key.hasPrefix("patch")
+        if writes { writingActive += 1; maximumWriters = max(maximumWriters, writingActive) }
+        defer { active -= 1; if writes { writingActive -= 1 } }
         try await Task.sleep(nanoseconds: 3_000_000)
         let result: String
         if key.hasPrefix("ledger") {
@@ -17,10 +20,12 @@ import XCTest
         } else if key.hasPrefix("write") {
             evidenceFinished = true
             result = instruction.contains("topic “Recognition”") ? "## Recognition\n- Recognize revenue when the required condition is met." : "## Allocation\n- Allocate the price by relative standalone values."
-        } else {
+        } else if key.hasPrefix("sanity") {
+            XCTAssertLessThanOrEqual(tokens, 260)
+            XCTAssertTrue(instruction.contains("NOT a writer"))
             XCTAssertTrue(text.contains("RELEVANT ORIGINAL SOURCE"))
-            result = text.contains("COMPLETE TOPIC DRAFT:\n## Recognition") ? "## Recognition\n- Recognize revenue when the condition is met." : "## Allocation\n- Allocate by relative standalone values."
-        }
+            result = "{\"issues\":[]}"
+        } else { result = "{\"replacement\":\"No change.\"}" }
         partial(String(result.prefix(result.count / 2)))
         try await Task.sleep(nanoseconds: 3_000_000)
         partial(result); return result
@@ -33,10 +38,11 @@ final class CollaborativeEditingTests: XCTestCase {
         let result = try await AppleNotesAI.compose(String(repeating: "Revenue is recognized when the stated condition is met. Allocation uses standalone values.\n", count: 120), length: .auto, format: .outline, workers: 4, editing: true, infer: model, fraction: { fractions.append($0) }, partial: { text.append($0) }, activity: { activity.append($0) }, sections: { snapshots.append($0) })
         XCTAssertTrue(model.evidenceFinished)
         XCTAssertEqual(model.keys.filter { $0.hasPrefix("plan") }.count, 1)
-        XCTAssertEqual(model.keys.filter { $0.hasPrefix("editor") }.count, 2)
+        XCTAssertEqual(model.keys.filter { $0.hasPrefix("sanity") }.count, 2)
         XCTAssertEqual(model.keys.filter { $0.hasPrefix("write") }.count, 2)
         XCTAssertFalse(model.keys.contains { $0.hasPrefix("reduce") })
         XCTAssertLessThanOrEqual(model.maximum, 4); XCTAssertGreaterThan(model.maximum, 1)
+        XCTAssertEqual(model.maximumWriters, 1)
         XCTAssertFalse(text.contains { $0.contains("INTERNAL_EVIDENCE_ONLY") })
         XCTAssertTrue(snapshots.contains { $0.filter { $0.worker != nil }.count == 2 })
         XCTAssertEqual(result.summary.components(separatedBy: "## Recognition").count, 2)
@@ -45,7 +51,8 @@ final class CollaborativeEditingTests: XCTestCase {
         XCTAssertEqual(activity.last, [])
     }
     @MainActor func testWorkerPoolClampsToFourAndRetainsSourceOrder() async throws {
-        var active = 0, maximum = 0, seen: [[NoteWorker]] = []
+        var active = 0, maximum = 0
+    var writingActive = 0, maximumWriters = 0, seen: [[NoteWorker]] = []
         let values = try await NoteWorkerPool.map(Array(0..<12), limit: 99, activity: { seen.append($0) }, label: { "Passage \($0)" }) { _, index, value in
             active += 1; maximum = max(maximum, active); defer { active -= 1 }
             try await Task.sleep(nanoseconds: UInt64(12 - index) * 1_000_000)
@@ -73,7 +80,7 @@ final class CollaborativeEditingTests: XCTestCase {
             let model = SyntheticAppleInference()
             _ = try await AppleNotesAI.compose("A source condition and relative standalone prices.", length: length, format: .outline, workers: 1, editing: false, infer: model)
             XCTAssertEqual(model.maximum, 1); XCTAssertEqual(model.keys.filter { $0.hasPrefix("plan") }.count, 1)
-            XCTAssertFalse(model.keys.contains { $0.hasPrefix("editor") })
+            XCTAssertFalse(model.keys.contains { $0.hasPrefix("sanity") })
         }
     }
     @MainActor func testConcurrentTopicUpdatesKeepStableIdsAndOtherTopics() {

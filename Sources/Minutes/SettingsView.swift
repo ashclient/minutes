@@ -30,11 +30,11 @@ import AppKit
             HStack(alignment: .top) { Text(apple.message).font(.caption).foregroundStyle(.secondary); Spacer(); Button("Check again") { apple = AppleAIAvailability.current }.font(.caption) }
             if provider == "apple" {
                 Text("Keeps evidence for each topic, writes connected notes, then checks complete topics. Uses Apple’s local model; it does not automate Siri.").font(.callout).foregroundStyle(.secondary)
-                Toggle("Collaborative topic editing", isOn: $appleCollaborativeEditing)
+                Toggle("Quick sanity reviewers", isOn: $appleCollaborativeEditing)
                 Picker("On-device workers", selection: $appleNoteWorkers) {
                     ForEach(1...4, id: \.self) { Text(String($0)).tag($0) }
                 }.pickerStyle(.segmented)
-                Text("Each worker uses a separate model session. More workers share your Mac’s compute and may be queued by macOS; choose 1 for the lightest load.").font(.caption).foregroundStyle(.secondary)
+                Text("One main writer creates the notes. Extra workers briefly flag material issues; they do not rewrite sections. Sessions share your Mac’s compute.").font(.caption).foregroundStyle(.secondary)
             } else {
             Text("Add your " + cloud.title + " API key once.").font(.callout).foregroundStyle(.secondary)
             HStack {

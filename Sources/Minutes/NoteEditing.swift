@@ -88,8 +88,13 @@ enum NoteEvidence {
         let wanted = words(topic)
         // Use exact source excerpts, never invented material or model reasoning.
         let parts = AppleTextBudget.chunks(source, bytes: 1000)
-        let ranked = parts.enumerated().map { (offset: $0.offset, element: $0.element, score: words($0.element).intersection(wanted).count) }.sorted {
-            $0.score == $1.score ? $0.offset < $1.offset : $0.score > $1.score
+        let scored: [(offset: Int, element: String, score: Int)] = parts.enumerated().map { item in
+            let score = words(item.element).intersection(wanted).count
+            return (offset: item.offset, element: item.element, score: score)
+        }
+        let ranked = scored.sorted { left, right in
+            if left.score == right.score { return left.offset < right.offset }
+            return left.score > right.score
         }
         var result = ""
         for entry in ranked {

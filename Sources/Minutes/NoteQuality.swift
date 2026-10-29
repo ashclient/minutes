@@ -33,6 +33,14 @@ enum NoteQuality {
             return qualitative && value.contains("=") && value.rangeOfCharacter(from: .decimalDigits) == nil
         }
     }
+    static func cacheable(_ text: String, tag: String) -> Bool {
+        if tag.hasPrefix("sanity-v8") || tag.hasPrefix("patch-v8") { return false }
+        if tag.hasPrefix("plan-v8") {
+            guard let data = text.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+            return object["topics"] is [[String: Any]]
+        }
+        return complete(text) && !hasQualitativeEquation(text)
+    }
     static func acceptableEdit(_ candidate: String, original: String) -> Bool {
         guard complete(candidate), !hasQualitativeEquation(candidate) else { return false }
         // A compact edit may remove duplication, but never silently reduce a
@@ -86,5 +94,35 @@ enum EvidenceLedger {
             }
         }
         if !current.isEmpty { result.append(current) }; return result
+    }
+}
+
+struct NoteReviewIssue: Sendable {
+    let quote: String
+    let reason: String
+}
+enum NoteSanityReview {
+    static func issues(_ response: String, original: String) -> [NoteReviewIssue] {
+        struct Report: Decodable { struct Issue: Decodable { let quote: String; let reason: String }; let issues: [Issue] }
+        guard let data = response.data(using: .utf8), let report = try? JSONDecoder().decode(Report.self, from: data) else { return [] }
+        var seen = Set<String>()
+        return report.issues.compactMap { item in
+            let quote = item.quote.trimmingCharacters(in: .whitespacesAndNewlines)
+            let reason = item.reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard quote.count >= 4, quote.utf8.count <= 600, !reason.isEmpty,
+                  original.contains(quote), seen.insert(quote).inserted,
+                  original.count < 80 || quote.count <= original.count * 3 / 4 else { return nil }
+            return NoteReviewIssue(quote: quote, reason: String(reason.prefix(240)))
+        }.prefix(2).map { $0 }
+    }
+    static func patched(_ response: String, issue: NoteReviewIssue, original: String) -> String? {
+        struct Patch: Decodable { let replacement: String }
+        guard let data = response.data(using: .utf8), let patch = try? JSONDecoder().decode(Patch.self, from: data),
+              !patch.replacement.contains("\n## "), patch.replacement.utf8.count <= 1200,
+              original.components(separatedBy: issue.quote).count == 2,
+              let range = original.range(of: issue.quote) else { return nil }
+        var value = original; value.replaceSubrange(range, with: patch.replacement)
+        guard NoteQuality.acceptableEdit(value, original: original) else { return nil }
+        return value
     }
 }
