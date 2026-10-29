@@ -32,6 +32,14 @@ jobs:
             pkill -TERM -x Minutes || true
             sleep 1
           done
+          for layout in Day Week Month Agenda; do
+            python3 Checks/preview_fixture.py
+            open dist/Minutes.app --args --preview-calendar "--calendar-layout=$layout"
+            sleep 3
+            screencapture -x "dist/Minutes-calendar-$layout.png"
+            pkill -TERM -x Minutes || true
+            sleep 1
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: Minutes-preview

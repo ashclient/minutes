@@ -84,19 +84,16 @@ struct AIClient: Sendable {
     func summarize(_ source: String, length: NotesLength = .complete, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void) async throws -> SummaryResult {
         guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AppFailure("No speech was found. You can listen to the saved recording.") }
         let system = NotesLength.basePrompt + "\n" + length.instruction
-        // Larger text batches plus bounded parallel requests. No source cap and
-        // no recursive compression of finished notes.
-        let parts = Self.chunks(source, limit: 12000)
-        await progress("Writing your notes…")
-        let sections = try await OrderedBatch.map(Array(parts.enumerated()), concurrency: 3, progress: { awaitFraction in fraction(awaitFraction * 0.65) }) { item in
-            try await generate(system: system, text: "<source section=\"\(item.offset + 1)\" total=\"\(parts.count)\">\n\(item.element)\n</source>")
-        }
-        await progress("Checking accuracy and organizing notes…")
-        let reviewed = try await OrderedBatch.map(Array(sections.enumerated()), concurrency: 3, progress: { value in fraction(0.65 + value * 0.35) }) { item in
-            let previous = item.offset > 0 ? String(sections[item.offset - 1].summary.suffix(2500)) : ""
-            let draft = try JSONEncoder().encode(item.element)
-            return try await generate(system: NotesLength.basePrompt + "\n" + length.instruction + "\n" + NotesLength.reviewPrompt,
-                text: "PREVIOUS SECTION (context only, do not repeat):\n" + previous + "\nORIGINAL SOURCE FOR THIS SECTION:\n" + parts[item.offset] + "\nDRAFT TO CHECK:\n" + String(decoding: draft, as: UTF8.self))
+        // Each worker drafts then verifies its own section; a slow draft no longer
+        // blocks reviews of every other section. Bound total network requests to four.
+        let parts = Self.chunks(source, limit: 18000)
+        await progress("Writing and checking your notes…")
+        let reviewed = try await OrderedBatch.map(Array(parts.enumerated()), concurrency: 4, progress: fraction) { item in
+            let section = try await generate(system: system, text: "<source section=\"\(item.offset + 1)\" total=\"\(parts.count)\">\n\(item.element)\n</source>")
+            let previous = item.offset > 0 ? String(parts[item.offset - 1].suffix(2000)) : ""
+            let draft = try JSONEncoder().encode(section)
+            return try await generate(system: system + "\n" + NotesLength.reviewPrompt,
+                text: "PREVIOUS SECTION (context only, do not repeat):\n" + previous + "\nORIGINAL SOURCE FOR THIS SECTION:\n" + item.element + "\nDRAFT TO CHECK:\n" + String(decoding: draft, as: UTF8.self))
         }
         return NotesLength.combine(reviewed)
     }

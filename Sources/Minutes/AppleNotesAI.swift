@@ -60,15 +60,13 @@ enum AppleTextBudget {
         let availability = AppleAIAvailability.current
         guard availability.available else { throw AppFailure(availability.message) }
         guard #available(macOS 27.0, *) else { throw AppFailure("Experimental Apple Intelligence requires macOS 27 or newer.") }
-        let parts = AppleTextBudget.chunks(source, bytes: 1800)
+        let parts = AppleTextBudget.chunks(source, bytes: 2400)
         guard !parts.isEmpty else { throw AppFailure("Add notes or a transcript before making notes.") }
-        fraction(0)
-        var notes: [SummaryResult] = []
-        for (index, text) in parts.enumerated() {
-            try Task.checkCancellation()
-            progress("Writing notes with Apple Intelligence…")
-            notes.append(try await generate(text, length: length))
-            fraction(Double(index + 1) / Double(parts.count))
+        progress("Writing notes with Apple Intelligence…")
+        // Separate sessions permit overlapping requests without overlapping turns
+        // in a single session. Keep only two in flight to bound device pressure.
+        let notes = try await OrderedBatch.map(parts, concurrency: 2, progress: fraction) { text in
+            try await generate(text, length: length)
         }
         return NotesLength.combine(notes)
     }

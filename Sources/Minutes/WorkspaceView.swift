@@ -92,18 +92,18 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
     }
     private var sidebarView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { Image(systemName: "waveform").font(.system(size: 16)); Text("Minutes").font(.system(size: 14, weight: .semibold)); Spacer(); Button { store.create() } label: { Image(systemName: "square.and.pencil") }.help("New note · ⌘N").accessibilityLabel("New note") }.buttonStyle(.plain).padding(.horizontal, 18).padding(.top, 20).padding(.bottom, 22)
+            HStack { Image(systemName: "waveform").font(.system(size: 16)); Text("Minutes").font(.system(size: 14, weight: .semibold)); Spacer(); Button { store.create() } label: { Image(systemName: "square.and.pencil") }.help("New note · ⌘N").accessibilityLabel("New note") }.buttonStyle(QuietButtonStyle()).padding(.horizontal, 18).padding(.top, 20).padding(.bottom, 22)
             HStack(spacing: 8) { Image(systemName: "magnifyingglass"); TextField("Search notes", text: $store.query).textFieldStyle(.plain) }.font(.system(size: 12)).foregroundStyle(.secondary).padding(9).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7)).padding(.horizontal, 12)
-            Button { showCalendar.toggle() } label: { HStack { Image(systemName: "calendar"); Text(showCalendar ? "Back to notes" : "Calendar"); Spacer() }.font(.system(size: 12)).padding(10).background(showCalendar ? Color.primary.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(.plain).padding(.horizontal, 12).padding(.top, 10)
+            Button { showCalendar.toggle() } label: { HStack { Image(systemName: "calendar"); Text(showCalendar ? "Back to notes" : "Calendar"); Spacer() }.font(.system(size: 12)).padding(10).background(showCalendar ? Color.primary.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 7)) }.buttonStyle(QuietButtonStyle()).padding(.horizontal, 12).padding(.top, 10)
             ScrollView {
                 VStack(alignment: .leading, spacing: 3) {
                     if calendar.authorized && store.query.isEmpty && store.filter != "Trash" {
-                        HStack { sectionLabel("Upcoming"); Spacer(); Button { calendar.refresh() } label: { Image(systemName: "arrow.clockwise").font(.system(size: 10)) }.buttonStyle(.plain).help("Refresh events") }.padding(.horizontal, 9).padding(.top, 24).padding(.bottom, 5)
+                        HStack { sectionLabel("Upcoming"); Spacer(); Button { calendar.refresh() } label: { Image(systemName: "arrow.clockwise").font(.system(size: 10)) }.buttonStyle(QuietButtonStyle()).help("Refresh events") }.padding(.horizontal, 9).padding(.top, 24).padding(.bottom, 5)
                         ForEach(Array(calendar.events.filter { $0.end > Date() }.prefix(showAllEvents ? calendar.events.count : 5))) { event in eventRow(event) }
                         if calendar.events.isEmpty { Text(calendar.message).font(.system(size: 11)).foregroundStyle(.secondary).padding(9) }
-                        if calendar.events.count > 5 { Button(showAllEvents ? "Show less" : "View all events") { showAllEvents.toggle() }.font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(.secondary).padding(9) }
+                        if calendar.events.count > 5 { Button(showAllEvents ? "Show less" : "View all events") { showAllEvents.toggle() }.font(.system(size: 11)).buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).padding(9) }
                     } else if !calendar.authorized && store.query.isEmpty {
-                        Button { openSettings("Connections") } label: { Label("Connect Google Calendar", systemImage: "calendar.badge.plus").font(.system(size: 11)).foregroundStyle(.secondary).padding(.vertical, 16).padding(.horizontal, 8) }.buttonStyle(.plain)
+                        Button { openSettings("Connections") } label: { Label("Connect Google Calendar", systemImage: "calendar.badge.plus").font(.system(size: 11)).foregroundStyle(.secondary).padding(.vertical, 16).padding(.horizontal, 8) }.buttonStyle(QuietButtonStyle())
                     }
                     HStack {
                         sectionLabel(store.filter == "Trash" ? "Trash" : store.filter == "Favorites" ? "Favorites" : "Your notes"); Spacer()
@@ -113,9 +113,31 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                     if store.visible.isEmpty { Text(store.query.isEmpty ? "No notes yet" : "No matching notes").font(.system(size: 12)).foregroundStyle(.tertiary).padding(10) }
                 }.padding(.horizontal, 10).padding(.bottom, 20)
             }
+            activityStatus
             Divider().opacity(0.5)
-            HStack { Button { openSettings("Connections") } label: { Label("Connections", systemImage: "link").font(.system(size: 12)) }; Spacer(); Button { openSettings("General") } label: { Image(systemName: "gearshape").font(.system(size: 13)) }.help("Settings").accessibilityLabel("Settings") }.foregroundStyle(.secondary).buttonStyle(.plain).padding(18)
+            HStack { Button { openSettings("Connections") } label: { Label("Connections", systemImage: "link").font(.system(size: 12)) }; Spacer(); Button { openSettings("General") } label: { Image(systemName: "gearshape").font(.system(size: 13)) }.help("Settings").accessibilityLabel("Settings") }.foregroundStyle(.secondary).buttonStyle(QuietButtonStyle()).padding(18)
         }.background(Color(nsColor: .windowBackgroundColor))
+    }
+    private var activityStatus: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if pipeline.working, let id = pipeline.activeID {
+                Button { store.selectedID = id; showCalendar = false } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack { ActivityPulse(); Text("Working in background").font(.system(size: 11, weight: .medium)); Spacer(); Image(systemName: "arrow.up.right").font(.system(size: 9)) }
+                        Text(store.meetings.first(where: { $0.id == id })?.title ?? "Meeting").font(.system(size: 11)).lineLimit(1)
+                        ProcessingProgressView(message: pipeline.message, fraction: pipeline.progressFraction)
+                    }.padding(10).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
+                }.buttonStyle(QuietButtonStyle()).help("Open the meeting being processed. Switching notes keeps processing running.")
+            } else if recorder.recording, let id = recorder.meetingID {
+                Button { store.selectedID = id; showCalendar = false } label: {
+                    HStack { Circle().fill(.red).frame(width: 6, height: 6); Text(recorder.paused ? "Recording paused" : "Recording"); Spacer(); RecordingClock(meters: recorder.meters) }.font(.system(size: 11)).padding(10)
+                }.buttonStyle(QuietButtonStyle())
+            } else if pipeline.stage == "failed" || pipeline.stage == "paused", let id = pipeline.activeID {
+                Button { store.selectedID = id; showCalendar = false } label: { Label(pipeline.stage == "failed" ? "Notes need attention" : "Processing paused", systemImage: "exclamationmark.circle").font(.system(size: 11)).padding(8) }.buttonStyle(QuietButtonStyle())
+            }
+            if !notion.syncing.isEmpty { HStack { ActivityPulse(); Text("Syncing to Notion…").font(.system(size: 11)); Spacer(); ProgressView().controlSize(.mini) }.padding(.horizontal, 10) }
+            if calendar.monthLoading { HStack { ProgressView().controlSize(.mini); Text("Loading calendar…").font(.system(size: 11)) }.padding(.horizontal, 10) }
+        }.padding(.horizontal, 10).padding(.bottom, pipeline.working || recorder.recording || !notion.syncing.isEmpty || calendar.monthLoading ? 10 : 0)
     }
     private func openEvent(_ event: CalendarMeeting) {
         showCalendar = false
@@ -127,7 +149,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 RoundedRectangle(cornerRadius: 2).fill(event.color).frame(width: 5, height: 23).padding(.top, 2)
                 VStack(alignment: .leading, spacing: 4) { Text(event.title).lineLimit(1).foregroundStyle(.primary); Text(eventTime(event.start)).font(.system(size: 10)).foregroundStyle(.secondary) }; Spacer(minLength: 0)
             }.font(.system(size: 12)).padding(.horizontal, 9).padding(.vertical, 7).contentShape(Rectangle())
-        }.buttonStyle(.plain).help(event.title + " · " + eventTime(event.start))
+        }.buttonStyle(QuietButtonStyle()).help(event.title + " · " + eventTime(event.start))
     }
     private func noteRow(_ note: Meeting) -> some View {
         Button { showCalendar = false; store.selectedID = note.id } label: {
@@ -137,7 +159,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 Text(note.title).font(.system(size: 12)).lineLimit(1); Spacer(minLength: 0)
                 if note.favorite { Image(systemName: "star.fill").font(.system(size: 8)).foregroundStyle(.secondary) }
             }.padding(.horizontal, 10).padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading).background(store.selectedID == note.id ? Color.primary.opacity(0.065) : Color.clear, in: RoundedRectangle(cornerRadius: 7)).contentShape(Rectangle())
-        }.buttonStyle(.plain).contextMenu {
+        }.buttonStyle(QuietButtonStyle()).contextMenu {
             Button(note.favorite ? "Remove favorite" : "Favorite") { store.update(note.id) { $0.favorite.toggle() } }
             Button("Export notes…") { store.export(note) }
             if note.trashed { Button("Restore") { store.update(note.id) { $0.trashed = false } }; Button("Delete permanently…", role: .destructive) { deletingID = note.id }.disabled(protected(note.id)) }
@@ -155,13 +177,12 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                     Button(meeting.favorite ? "Remove favorite" : "Favorite") { store.update(meeting.id) { $0.favorite.toggle() } }
                     Button("Manage recordings…") { detailsID = meeting.id }
                     if !meeting.audioFiles.isEmpty { Button("Transcribe again…") { transcribeAgain = true }.disabled(!processingAvailable) }
-                    if !meeting.summary.isEmpty { Button("Regenerate summary…") { regenerate = true }.disabled(!processingAvailable) }
                     Button("Sync to Notion") { sync(meeting.id) }
                     Divider(); Button("Move to Trash") { store.update(meeting.id) { $0.trashed = true }; store.selectedID = nil }.disabled(protected(meeting.id))
                 } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 22)
             }
             Menu { Button("Import audio…", action: importAudio); Button("Import notes or backup…") { store.importText() }; Button("Export backup…") { store.export() } } label: { Image(systemName: "plus") }.menuStyle(.borderlessButton).frame(width: 16).help("Import & export")
-        }.buttonStyle(.plain).foregroundStyle(.secondary).padding(.horizontal, 24).frame(height: 53)
+        }.buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).padding(.horizontal, 24).frame(height: 53)
     }
     private func document(_ note: Meeting) -> some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -190,7 +211,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                     Button("Regenerate…") { regenerate = true }.disabled(!processingAvailable)
                     Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(note.finishedNotes, forType: .string) } label: { Label("Copy", systemImage: "doc.on.doc") }
                     Button { draft = note.finishedNotes; editingID = note.id } label: { Label("Edit", systemImage: "pencil") }.disabled(processingSelected)
-                }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary)
+                }.buttonStyle(QuietButtonStyle()).font(.system(size: 11)).foregroundStyle(.secondary)
                 NoteDocument(text: note.finishedNotes).equatable()
             }
             if !note.audioFiles.isEmpty || !note.transcript.isEmpty || recordingSelected { sourceCard(note) }
@@ -215,7 +236,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                     }.accessibilityLabel(transcriptOpen ? "Hide transcript" : "Show transcript")
                 }
                 Spacer(minLength: 0)
-            }.buttonStyle(.plain).font(.system(size: 12, weight: .medium)).padding(.vertical, 12)
+            }.buttonStyle(QuietButtonStyle()).font(.system(size: 12, weight: .medium)).padding(.vertical, 12)
             if recordingsOpen {
                 Divider()
                 ForEach(Array(note.audioFiles.enumerated()), id: \.element) { index, file in
@@ -240,7 +261,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
     private var footer: some View {
         VStack(spacing: 10) {
             if recorder.recording && !pipeline.working {
-                if recorder.meetingID != store.selectedID { Button { store.selectedID = recorder.meetingID } label: { HStack { Image(systemName: "arrow.turn.up.left"); Text("Return to recording"); Spacer(); Text(store.meetings.first { $0.id == recorder.meetingID }?.title ?? "").lineLimit(1) }.font(.system(size: 11)).foregroundStyle(.secondary) }.buttonStyle(.plain) }
+                if recorder.meetingID != store.selectedID { Button { store.selectedID = recorder.meetingID } label: { HStack { Image(systemName: "arrow.turn.up.left"); Text("Return to recording"); Spacer(); Text(store.meetings.first { $0.id == recorder.meetingID }?.title ?? "").lineLimit(1) }.font(.system(size: 11)).foregroundStyle(.secondary) }.buttonStyle(QuietButtonStyle()) }
                 RecordingSourceMeters(meters: recorder.meters, muted: recorder.microphoneMuted, computer: recorder.computerEnabled, input: recorder.inputName, status: recorder.computerStatus)
                 RecordingControls()
                 if let failure = recorder.failure { Text(failure).font(.caption).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading) }
@@ -250,7 +271,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 HStack(spacing: 12) {
                     Menu { Toggle("Include computer audio", isOn: $includeComputer); Divider(); Button("Import audio…", action: importAudio); Button("Import notes…") { store.importText() } } label: { Label(includeComputer ? "Mic + computer" : "Microphone", systemImage: includeComputer ? "speaker.wave.2" : "mic").font(.system(size: 11)) }.menuStyle(.borderlessButton).fixedSize().foregroundStyle(.secondary)
                     Spacer()
-                    Button { pipeline.start(store: store, recorder: recorder) } label: { Label("Record this meeting", systemImage: "mic.fill").font(.system(size: 12, weight: .medium)).padding(.horizontal, 14).padding(.vertical, 10).foregroundStyle(Color(nsColor: .textBackgroundColor)).background(Color.primary, in: Capsule()) }.buttonStyle(.plain).keyboardShortcut("r", modifiers: [.command, .shift])
+                    Button { pipeline.start(store: store, recorder: recorder) } label: { Label("Record this meeting", systemImage: "mic.fill").font(.system(size: 12, weight: .medium)).padding(.horizontal, 14).padding(.vertical, 10).foregroundStyle(Color(nsColor: .textBackgroundColor)).background(Color.primary, in: Capsule()) }.buttonStyle(QuietButtonStyle()).keyboardShortcut("r", modifiers: [.command, .shift])
                 }
             }
         }.padding(16).frame(maxWidth: 740).background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 14)).overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.07))).padding(.horizontal, 28).padding(.bottom, 20)
