@@ -69,13 +69,30 @@ enum GoogleOAuth {
     private var continuation: CheckedContinuation<(String, String), Error>?
     private var timeout: Task<Void, Never>?
     func cancel() { finish(.failure(CancellationError())) }
-    func authorize(_ config: GoogleClientConfig, verifier: String, state: String) async throws -> (String, String) {
+    func authorize(_ config: GoogleClientConfig, verifier: String, state: String, openBrowser: @escaping @MainActor (URL) -> Bool = { NSWorkspace.shared.open($0) }) async throws -> (String, String) {
+        try Task.checkCancellation()
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         let listener = try NWListener(using: parameters); self.listener = listener
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
                 self.continuation = continuation
+                // Network.framework requires a connection handler before start().
+                listener.newConnectionHandler = { [weak self] connection in
+                    let owner = self
+                    let reader = GoogleCallbackConnection(connection: connection) { request in
+                        Task { @MainActor in
+                            guard let self = owner else { return }
+                            guard let path = request.components(separatedBy: "\r\n").first?.split(separator: " ").dropFirst().first,
+                                  URLComponents(string: "http://127.0.0.1" + path)?.queryItems?.first(where: { $0.name == "state" })?.value == state else { return }
+                            guard let port = listener.port else { return }
+                            let redirect = "http://127.0.0.1:\(port.rawValue)/"
+                            do { self.finish(.success((try GoogleOAuth.callback(request, state: state), redirect))) }
+                            catch { self.finish(.failure(error)) }
+                        }
+                    }
+                    reader.start()
+                }
                 listener.stateUpdateHandler = { [weak self] status in
                     Task { @MainActor in
                         guard let self else { return }
@@ -83,20 +100,7 @@ enum GoogleOAuth {
                         case .ready:
                             guard let port = listener.port else { self.finish(.failure(AppFailure("Could not open Google sign-in."))); return }
                             let redirect = "http://127.0.0.1:\(port.rawValue)/"
-                            listener.newConnectionHandler = { [weak self] connection in
-                                let owner = self
-                                let reader = GoogleCallbackConnection(connection: connection) { request in
-                                    Task { @MainActor in
-                                        guard let self = owner else { return }
-                                        guard let path = request.components(separatedBy: "\r\n").first?.split(separator: " ").dropFirst().first,
-                                              URLComponents(string: "http://127.0.0.1" + path)?.queryItems?.first(where: { $0.name == "state" })?.value == state else { return }
-                                        do { self.finish(.success((try GoogleOAuth.callback(request, state: state), redirect))) }
-                                        catch { self.finish(.failure(error)) }
-                                    }
-                                }
-                                reader.start()
-                            }
-                            if !NSWorkspace.shared.open(GoogleOAuth.authorization(client: config.client_id, redirect: redirect, state: state, verifier: verifier)) { self.finish(.failure(AppFailure("Could not open your browser for Google sign-in."))) }
+                            if !openBrowser(GoogleOAuth.authorization(client: config.client_id, redirect: redirect, state: state, verifier: verifier)) { self.finish(.failure(AppFailure("Could not open your browser for Google sign-in."))) }
                         case .failed(let error): self.finish(.failure(error))
                         default: break
                         }

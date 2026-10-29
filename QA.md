@@ -1,4 +1,4 @@
-# Minutes 1.7 verification
+# Minutes 1.7.1 verification
 
 The macOS runner compiles release builds for arm64 and x86_64, runs Foundation core checks and XCTest, verifies the signature and packages the app. A synthetic note fixture is used to inspect the native one-page workspace.
 
@@ -9,3 +9,5 @@ A successful synthetic idle shutdown test does not establish live capture shutdo
 New checks cover the experimental Apple OS/hardware/enablement/readiness gate, exact Unicode preservation under UTF-8 input bounds, both Notion title formats and trash filtering, and an older-OS integration test verifying that Apple selection fails with its OS explanation instead of asking for an OpenRouter key. CI compiles the Foundation Models implementation but does not run real Apple model inference: the runner is macOS 26, and Apple summaries are intentionally gated to macOS 27+. Real summary quality and model availability require a supported user's Mac.
 
 Native screenshot smoke opens Connections and General settings separately to verify the fixed Done button, short connection cards, and Apple experimental availability explanation. Google app registration, Notion token creation, page permission policies and real account sync remain external acceptance checks.
+
+Google sign-in regression: use the real Network.framework listener and URLSession HTTP callback, simulate the browser only, ignore unrelated callback state, complete sign-in twice on the same instance, and fail promptly if the browser cannot open. The listener connection handler is now installed before start. Real Google consent and token exchange still require user approval in their browser.

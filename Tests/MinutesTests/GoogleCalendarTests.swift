@@ -2,6 +2,49 @@ import XCTest
 @testable import Minutes
 
 final class GoogleCalendarTests: XCTestCase {
+    @MainActor func testRealLoopbackListenerReceivesBrowserCallbackAndCanRetry() async throws {
+        // This uses the actual Network.framework listener and HTTP connection,
+        // replacing only the system browser. No Google credentials reach CI.
+        let signIn = GoogleSignIn()
+        let config = GoogleClientConfig(client_id: "test.apps.googleusercontent.com")
+        for _ in 0..<2 {
+            var requestTask: Task<Void, Error>?
+            let result = await AsyncDeadline.run(seconds: 8) {
+                try await signIn.authorize(config, verifier: "test-verifier", state: "test-state") { url in
+                    let query = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!
+                    let redirect = query.first { $0.name == "redirect_uri" }!.value!
+                    requestTask = Task {
+                        var callback = URLComponents(string: redirect)!
+                        // An unrelated browser request must not end sign-in.
+                        callback.queryItems = [URLQueryItem(name: "state", value: "wrong"), URLQueryItem(name: "code", value: "ignored")]
+                        _ = try await URLSession.shared.data(from: callback.url!)
+                        callback.queryItems = [URLQueryItem(name: "state", value: "test-state"), URLQueryItem(name: "code", value: "test-code")]
+                        let (body, response) = try await URLSession.shared.data(from: callback.url!)
+                        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+                        XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("test-code"))
+                    }
+                    return true
+                }
+            }
+            defer { signIn.cancel(); requestTask?.cancel() }
+            let (code, redirect) = try XCTUnwrap(result, "Local sign-in listener did not complete").get()
+            try await requestTask?.value
+            XCTAssertEqual(code, "test-code")
+            XCTAssertEqual(URL(string: redirect)?.host, "127.0.0.1")
+            XCTAssertGreaterThan(URL(string: redirect)?.port ?? 0, 0)
+        }
+    }
+    @MainActor func testBrowserOpenFailureEndsSignInImmediately() async throws {
+        let signIn = GoogleSignIn()
+        defer { signIn.cancel() }
+        let result = await AsyncDeadline.run(seconds: 8) {
+            try await signIn.authorize(GoogleClientConfig(client_id: "test.apps.googleusercontent.com"), verifier: "v", state: "s", openBrowser: { _ in false })
+        }
+        let finished = try XCTUnwrap(result)
+        XCTAssertThrowsError(try finished.get()) { error in
+            XCTAssertTrue(error.localizedDescription.contains("browser"))
+        }
+    }
     @MainActor func testDeadlineReturnsWithoutWaitingForStalledWork() async throws {
         let quick = await AsyncDeadline.run(seconds: 1) { 42 }
         XCTAssertEqual(try quick?.get(), 42)
