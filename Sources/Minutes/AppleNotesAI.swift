@@ -35,7 +35,12 @@ enum AppleTextBudget {
         var result: [String] = []; var current = ""; var size = 0
         for scalar in text.unicodeScalars {
             let count = String(scalar).utf8.count
-            if size + count > limit { result.append(current); current = ""; size = 0 }
+            if size + count > limit {
+                if let boundary = current.lastIndex(where: { $0.isWhitespace }), current.distance(from: current.startIndex, to: boundary) > current.count / 2 {
+                    let split = current.index(after: boundary)
+                    result.append(String(current[..<split])); current = String(current[split...]); size = current.utf8.count
+                } else { result.append(current); current = ""; size = 0 }
+            }
             current.unicodeScalars.append(scalar); size += count
         }
         if !current.isEmpty { result.append(current) }

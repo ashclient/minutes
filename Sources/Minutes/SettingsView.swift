@@ -38,7 +38,7 @@ import AppKit
                     Picker("Speech language", selection: $language) { Text("English (US)").tag("en-US"); Text("English (UK)").tag("en-GB"); Text("Spanish").tag("es-ES"); Text("French").tag("fr-FR"); Text("German").tag("de-DE") }
                     Text("Speech language support depends on your Mac. You may need to enable Dictation in macOS Keyboard settings.").font(.caption).foregroundStyle(.secondary)
                     if enabled {
-                        Button("Disconnect AI") { do { try CloudKey.save(""); enabled = false; message = "Disconnected. You can still record and transcribe." } catch { message = error.localizedDescription } }
+                        Button("Remove OpenRouter key") { do { try CloudKey.save(""); enabled = false; message = "OpenRouter key removed." } catch { message = error.localizedDescription } }
                     }
                     Button("Open recordings folder") { NSWorkspace.shared.open(FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Minutes/Audio")) }
                 }.padding(.top, 10)

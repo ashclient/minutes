@@ -63,6 +63,8 @@ import UniformTypeIdentifiers
             }
         }
         .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("--preview-connections") { settingsTab = "Connections"; setup = true }
+            if ProcessInfo.processInfo.arguments.contains("--preview-settings") { settingsTab = "General"; setup = true }
             if UserDefaults.standard.bool(forKey: "notionAutoSync") {
                 for note in store.meetings where !note.trashed && note.notionNeedsSync == true && (note.notionPageID != nil || note.calendarEventKey != nil) {
                     Task { await notion.sync(id: note.id, store: store) }

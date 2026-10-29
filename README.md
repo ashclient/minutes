@@ -1,4 +1,4 @@
-# Minutes 1.6
+# Minutes 1.7
 
 Native Mac meeting notes. macOS 14+; the direct long-form Apple speech engine needs macOS Tahoe 26 on supported hardware.
 
@@ -30,11 +30,22 @@ The local callback listener binds only to 127.0.0.1 on an ephemeral port. Sign-i
 
 ## Connect Notion
 
-In Connections, create a Notion internal connection with read/insert/update content access. Share a parent page with it using that page's Connections menu. Paste the secret and parent page link into Minutes, then connect. New setups create ordinary child pages in that parent. An existing Notion database remains supported as an alternate destination, and old database-backed meeting links keep their parent type.
+Click Connect Notion to open a two-step guide:
 
-The page title contains the event name and a date mention (Notion chooses the relative date display, such as Today). The body shows your own notes and generated notes, and optionally the transcript. Minutes updates its own visible quote section; keep edits made directly in Notion outside that section. The page title and date are also updated on sync. Notion's exact native Calendar-to-AI-meeting-note attachment and tab controls are not exposed through the documented Calendar API; this app creates real Notion pages without claiming to control those native features.
+1. Open Notion's personal-token page, create a token for your workspace with Notion API capability, and paste it in Minutes. Personal tokens act as you, so pages do not need to be shared with a bot. Workspace policy may limit who can create tokens. This private app supports your personal workflow; a public distribution would need its own Notion OAuth connection.
+2. Pick the page where meeting pages should be created. Search and pagination are supported. If the page is not listed, paste its link under My page isn't listed. Click Use this page.
 
-Sync is one-way from Minutes. The page ID is saved before content upload so normal retries reuse the page. Like other APIs without an idempotency key, a lost create-page response can leave an orphan page. Errors are visible with retry. No credentials or real account connections are exercised by CI.
+An existing internal connection token still works. If using one, add the connection to the destination page through Notion's page Connections menu first. Previously connected databases continue to work; choosing a new destination through the guide creates ordinary child pages in the selected parent page. Credentials stay in macOS Keychain.
+
+Meeting titles contain the event name and a real date mention. Minutes updates its own visible notes section; keep edits made directly in Notion outside that section. The native Notion Calendar-to-AI-meeting-note attachment is not exposed through its documented Calendar API. Normal retries reuse the saved page ID. A lost create-page response can still leave an orphan page because that API does not provide an idempotency key.
+
+## Experimental Apple Intelligence summaries
+
+In General, choose Apple Intelligence. This opt-in feature uses Apple's Foundation Models framework, not Siri automation. This release requires macOS 27 or newer, eligible Apple Intelligence hardware/region, Apple Intelligence enabled in System Settings, and a ready model. The control is disabled with a reason on unsupported Macs. Availability is checked again before generation, so changing preferences cannot bypass the gate.
+
+Summaries use Apple's system model on the Mac with no API key and no bundled third-party model. Apple manages any required system-model download. Long transcripts are processed in fresh bounded sessions and reduced hierarchically; no raw source text is truncated. Experimental summaries can be less detailed than OpenRouter, and guardrails/context limits may reject a request. Errors retain the recording, transcript and existing notes. The app never silently switches an Apple summary to a cloud provider. Select OpenRouter explicitly if you want to use it instead.
+
+The Google Connect button is now always actionable: it opens the setup guide when app registration is missing. This UI change does not provision a Google OAuth client; that one-time developer registration remains required. The guide walks through registration, file import and browser sign-in one step at a time.
 
 ## Recording and AI
 

@@ -23,13 +23,19 @@ jobs:
         continue-on-error: true
         run: |
           python3 Checks/preview_fixture.py
-          open dist/Minutes.app
+          open dist/Minutes.app --args --preview-connections
           sleep 3
           screencapture -x dist/Minutes-preview.png
+          osascript -e 'tell application id "com.minutes.local" to quit'
+          open dist/Minutes.app --args --preview-settings
+          sleep 3
+          screencapture -x dist/Minutes-settings.png
       - uses: actions/upload-artifact@v4
         with:
           name: Minutes-preview
-          path: dist/Minutes-preview.png
+          path: |
+            dist/Minutes-preview.png
+            dist/Minutes-settings.png
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
