@@ -1,9 +1,9 @@
-# Minutes 2.5.1
+# Minutes 2.5.2
 
-- Removed the stray vertical cursor below streaming notes.
-- Added a subtle animated glint to processing bars, with Reduce Motion support.
-- Background processing status appears in the sidebar only when viewing another note or the calendar.
-- Refined quiet-button hit areas, hover borders and press feedback.
-- Auto now consolidates the whole lecture before writing one set of concise study notes, rather than joining independently expanded sections. No fixed word quota.
+- Reworked Auto / Outline around personal class notes: short plain explanations mixed with useful lists, rather than a report of everything said.
+- Adapts to business definitions and comparisons, accounting scenarios and account effects, and math variables, formulas and worked steps.
+- Retains the meaning of definitions and the setup of selected examples through Apple's evidence passes. Drops repetition and incomplete examples.
+- Keeps repeated account labels and numbered steps in separate worked examples during consolidation.
+- Added hover feedback to the finish-sheet detail choices.
 
-Recordings, transcripts, custom notes and previous summaries are retained. Regenerate an existing summary to use the revised Auto behavior.
+Use Regenerate → Auto with Outline on an existing note to apply the new style. Recording, transcription and custom notes are retained. This release changes instructions and consolidation; exact model output still depends on source quality and the selected provider.

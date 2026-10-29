@@ -5,13 +5,13 @@ enum NotesLength: String, Codable, Sendable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String { switch self { case .auto: return "Auto"; case .brief: return "Brief"; case .detailed: return "Detailed"; case .complete: return "Full detail" } }
     var explanation: String { switch self {
-    case .auto: return "Concise study notes on the most important information. Length adapts to the lecture."
+    case .auto: return "Personal class notes: clear explanations, useful examples, and a length that fits the material."
     case .brief: return "Main topics and essential definitions. Up to 300 words for the entire lecture."
     case .detailed: return "Main topics, explanations, and selected examples. Up to 900 words total."
     case .complete: return "Thorough study notes: combine related ideas, retain explanations and worked examples, remove repetition."
     } }
     var instruction: String { switch self {
-    case .auto: return "AUTO STUDY NOTES: review all source material before choosing what belongs in the notes. Default to concise revision notes on the main concepts, not comprehensive coverage. Include supporting detail only when it changes understanding: a necessary definition, condition, formula or one representative example. Skip minor details and incomplete examples. Each concept should be explained once, even when the source returns to it. Do not create separate headings for synonyms or repeat examples under new headings. No target length, word quota, minimum, or maximum. Keep the most important information, organized into a small set of useful topics. Prefer short, informative bullets over long explanations. Combine related ideas and omit repeated or incidental material. Do not give every source fragment equal space. Include reasoning or an example only when essential to understanding the main topic. Do not pad the notes or invent missing context. Distinguish prices, quantities, standalone totals and transaction prices exactly as stated."
+    case .auto: return "AUTO PERSONAL CLASS NOTES: select the important information a student would actually write down to learn and revise this lecture. Explain each main concept once in plain language, with enough meaning to understand it later. Keep useful definitions, distinctions, formulas, necessary conditions and concise worked examples. Prefer a modest, readable set of notes; skip peripheral facts and repeated explanations. A new heading must introduce a genuinely different topic, not reword the previous one. No target length, word quota, minimum, or maximum: length follows the number and difficulty of useful concepts, not recording duration. Do not expand a compact source extract into a textbook lesson. Do not reduce it to unexplained keywords either. Keep an example's setup, quantities and result together; omit incomplete examples rather than inventing missing steps. No narration of what the teacher or class said."
     case .brief: return "BRIEF STUDY NOTES: the whole lecture must fit within 300 words, not 300 per section. Focus on main topics and essential definitions. Omit worked examples, repeated explanations, incidental names and generic advice."
     case .detailed: return "MEDIUM STUDY NOTES: the whole lecture must fit within 900 words. Group main topics, explain key reasoning and include only the most useful source-supported examples. Do not transcribe every exchange."
     case .complete: return "The user chose comprehensive college study notes. Synthesize and reorganize concepts, not the speaker’s wording or sequence. Keep substantive definitions, reasoning, formulas, worked examples, exceptions and exam requirements. Combine repeated points and related explanations. Drop conversational questions, roll call, chatter, duplicate facts and obvious filler. There is no fixed word count, but every bullet must add distinct study value. Do not restate the transcript line by line."
@@ -37,9 +37,19 @@ enum NotesLength: String, Codable, Sendable, CaseIterable, Identifiable {
 enum StudyFormat: String, Codable, CaseIterable, Identifiable, Sendable {
     case outline = "Outline", cornell = "Cornell", questions = "Q&A"
     var id: String { rawValue }
+    // Generalized structure inferred from class notes. No private page text,
+    // source examples, personal names or Notion identifiers are embedded here.
+    static let personalClassStyle = """
+    PERSONAL CLASS-NOTE FORMAT: use a natural mix of short paragraphs and lists, not a report or a bullet for every sentence. Use ## for actual topics; ### only for useful subtopics. Usually explain a term in one or two plain sentences, then use bullets for categories, comparisons, conditions or consequences. Indent supporting details under their parent. Keep wording direct and readable, with ordinary capitalization and correct spelling. Bold only key terms or important warnings. No Overview, Key Takeaways, generic wrap-up, or repetitive Definition / Application / Outcome labels.
+    Adapt to the material, using ONLY what the source supports:
+    - Business: term and meaning, related types or differences, advantages/disadvantages when taught, and a short relevant example. Keep related comparisons together.
+    - Accounting: a concise scenario followed by the accounts affected, increase/decrease and amount, plus the reason when needed. Keep the initial transaction and later payment distinct. State a balance check only when established; never invent one.
+    - Math: identify variables and units, state the relationship or formula, then give the meaningful worked steps and result. Explain what the result means in context. Keep warnings such as order or domain restrictions beside the relevant rule. Do not turn each arithmetic step into a separate topic.
+    A review question can be a short question followed immediately by its answer. Use numbered lists for a procedure or worked solution. A short paragraph may be better than a bullet. Use standalone readable formulas or properly closed $$ display math; no raw HTML or code fences around prose. Keep examples only when their complete setup and necessary values are present. Never copy mistakes, invent missing facts, or add examples merely to fill this layout.
+    """
     var instruction: String {
         switch self {
-        case .outline: return "Match personal college notes: ## topic headings, ### subtopics, concise plain-language bullets with indented supporting details; numbered steps for worked problems, short scenario statements and standalone formulas. Bold only important terms or warnings. Use a Review section only when the lecture actually reviews earlier material. Do not add repetitive Definition / Application / Outcome labels."
+        case .outline: return Self.personalClassStyle
         case .cornell: return "Use topic headings, then bold Cue: and Notes: labels for each major concept. End with one brief synthesis. Do not use a table."
         case .questions: return "Use topic headings and bold study questions followed by concise answers. Questions are revision prompts, not assigned homework."
         }

@@ -28,7 +28,7 @@ import SwiftUI
                             VStack(alignment: .leading, spacing: 5) { Text(option.title).fontWeight(.medium); Text(option.explanation).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                             Spacer(minLength: 0)
                         }.padding(11).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(length == option ? 0.07 : 0.025), in: RoundedRectangle(cornerRadius: 9))
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(SurfaceButtonStyle(radius: 9))
                 }
                 HStack {
                     Button("Decide later") { pipeline.finishID = nil }

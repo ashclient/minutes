@@ -201,7 +201,7 @@ import AVFoundation
             return
         }
         state("generating", "Writing your notes…", id: id, store: store)
-        let source = ["USER NOTES:\n" + meeting.notes, "TRANSCRIPT:\n" + meeting.transcriptText].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        let source = ["NOTE TITLE (context only, not evidence of lecture content):\n" + meeting.title, "USER NOTES:\n" + meeting.notes, "TRANSCRIPT:\n" + meeting.transcriptText].filter { !$0.isEmpty }.joined(separator: "\n\n")
         let result: SummaryResult
         if usingApple { result = try await AppleNotesAI.summarize(source, length: meeting.notesLength ?? .complete, format: meeting.studyFormat ?? .outline, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }, partial: { if !Task.isCancelled && self.activeID == id && self.stage == "generating" { self.liveDraft = $0 } }) }
         else { result = try await AIClient(apiKey: key).summarize(source, length: meeting.notesLength ?? .complete, format: meeting.studyFormat ?? .outline, fraction: { self.progressFraction = $0 }, progress: { text in self.message = text; store.progress = text }) }
