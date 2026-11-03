@@ -21,11 +21,15 @@ import AppKit
             }
             if !calendar.message.isEmpty { Text(calendar.message).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             Spacer()
+            HStack(spacing: 16) {
+                Link("Privacy policy", destination: URL(string: "https://ashclient.github.io/minutes/privacy.html")!)
+                Link("Terms of Service", destination: URL(string: "https://ashclient.github.io/minutes/terms.html")!)
+            }.font(.caption)
             DisclosureGroup("Advanced · custom app registration") {
                 Text("For developers or self-hosted builds only. Regular sign-in uses Minutes’ hosted sign-in service.").font(.caption).foregroundStyle(.secondary)
                 Button("Import a Desktop client…", action: importClient).disabled(calendar.signingIn)
             }.font(.caption).foregroundStyle(.secondary)
-        }.padding(24).frame(width: 490, height: 420)
+        }.padding(24).frame(width: 490, height: 460)
         .onDisappear { if calendar.signingIn { calendar.cancelSignIn() } }
     }
     private func importClient() {
