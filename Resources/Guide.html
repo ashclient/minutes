@@ -23,9 +23,9 @@ Command-Q saves text immediately, cancels processing, and closes audio capture w
 
 ## Connect Google Calendar
 
-Minutes 1.6 reads Google Calendar directly. It no longer reads macOS Calendar or iCloud, and does not request EventKit access. Existing notes are preserved.
+Minutes reads Google Calendar directly. It no longer reads macOS Calendar or iCloud, and does not request EventKit access. Existing notes are preserved.
 
-Choose Connections → Google Calendar → Sign in with Google. A publisher-configured build can include a Desktop registration so users do not select a setup file. This release has the sign-in code ready, but shared registration is pending the owner’s distribution approval. Existing imported registrations work as before. Choose calendars after signing in. Existing imported clients continue to work; custom registration is tucked under Advanced for developers.
+Choose Connections → Google Calendar → Sign in with Google. Regular users do not select a setup file. The app includes only a public client ID and HTTPS token-service route; the application secret stays on the private server. User access and refresh tokens stay in Keychain between exchanges. Calendar events are fetched directly by your Mac. Existing custom Desktop clients remain available under Advanced; same-client connections can use the hosted service without discarding their saved refresh tokens. Choose calendars after signing in.
 
 Sign-in opens your browser and uses PKCE S256, random state and a short-lived callback on 127.0.0.1. User access and refresh tokens stay in Keychain. Access is read-only. Google’s production consent, verification and account policies apply independently of the GitHub release.
 
@@ -46,7 +46,7 @@ In General, choose Apple Intelligence. This opt-in feature uses Apple&#x27;s Fou
 
 Summaries use Apple&#x27;s system model on the Mac with no API key and no bundled third-party model. Apple manages any required system-model download. Long transcripts are processed in fresh bounded sessions. Completed sections are joined without a second summarization pass, preserving the selected detail level; no raw source text is truncated. Experimental summaries can be less detailed than OpenRouter, and guardrails/context limits may reject a request. Errors retain the recording, transcript and existing notes. The app never silently switches an Apple summary to a cloud provider. Select OpenRouter explicitly if you want to use it instead.
 
-Google Connect opens a simple browser sign-in screen. With a packaged Desktop registration, no setup-file import is needed. Without one, Advanced import remains available.
+Google Connect opens a simple browser sign-in screen. No setup-file import is needed for regular sign-in. Advanced import remains available for custom developer registrations.
 
 ## Recording and AI
 

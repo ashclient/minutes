@@ -1,8 +1,9 @@
-Minutes 2.8.2 improves the writing experience and public Google sign-in.
+Minutes 2.8.3 adds hosted Google sign-in and a public app website.
 
-- Native rich-text notes editor with larger text, aligned placeholder/caret, headings, bold, italic, bullets and keyboard shortcuts. Stored notes continue to sync as native Notion blocks.
-- Cleaner lecture formatting instructions: subject headings, fewer generic subheadings, inline formulas, and optional brief overviews.
-- Legacy inline dollar math is readable in Minutes and exports as native Notion equations, while currency stays text.
-- Shared Desktop OAuth registration support is ready: publisher-configured builds sign in without per-user JSON files. The real registration is not bundled in this release pending explicit distribution approval. Existing custom-client connections remain intact; developer import stays under Advanced.
+- Connect Google Calendar through your browser without importing an OAuth setup file.
+- Token exchange and refresh use the private sign-in service. Only the public client ID and HTTPS service route are bundled; the Google application secret stays in private server configuration.
+- Existing same-client connections can use the service without discarding saved refresh tokens. Distinct custom clients remain supported.
+- Built-in checks reject secret-bearing app configuration. Server checks enforce PKCE/loopback proof, bounded requests, read-only Calendar scopes and sanitized errors, without storing user tokens.
+- Homepage, Privacy Policy, Terms of Service and Support are published at https://ashclient.github.io/minutes/ .
 
-Google consent-screen production status and any required Calendar scope verification are managed separately in Google Cloud. This release does not assert that Google has approved public access. Actual AI output quality and account sign-in still require live hardware/account checks.
+Automated native Mac checks cover service reachability and rejection of a fabricated authorization code, not a real user's successful consent or token refresh. Google account, consent-screen and verification policies still apply.

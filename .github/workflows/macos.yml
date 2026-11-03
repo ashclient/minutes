@@ -8,11 +8,26 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test hosted Google token service
+        working-directory: Server/google-auth
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run check
+      - name: Check deployed Google endpoint with native macOS networking
+        run: |
+          swiftc -parse-as-library Checks/hosted_auth_smoke.swift -o /tmp/minutes-hosted-auth-smoke
+          /tmp/minutes-hosted-auth-smoke https://minutes-sign-in.mlitw002.chatgpt.site 21064175916-15avd7k3trqmgf1eu2dpnodrcjvcfe06.apps.googleusercontent.com
       - name: Test, check and build for Apple Silicon and Intel
         env:
           MINUTES_RUN_TESTS: '1'
           MINUTES_UNIVERSAL: '1'
           CI: 'true'
+          MINUTES_GOOGLE_CLIENT_ID: ${{ vars.MINUTES_GOOGLE_CLIENT_ID }}
+          MINUTES_GOOGLE_AUTH_URL: ${{ vars.MINUTES_GOOGLE_AUTH_URL }}
         run: bash build.command
       - name: Verify and package app
         run: |

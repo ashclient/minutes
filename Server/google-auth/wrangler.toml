@@ -1,0 +1,13 @@
+name = "minutes-google-auth"
+main = "src/index.js"
+compatibility_date = "2026-11-02"
+workers_dev = true
+
+# Supply GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET with wrangler secret put.
+[observability]
+enabled = false
+
+[[ratelimits]]
+name = "AUTH_RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }

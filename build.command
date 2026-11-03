@@ -34,7 +34,8 @@ mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$app_dir/Conte
 cp "$binary_dir/MinutesUpdateHelper" "$app_dir/Contents/Helpers/MinutesUpdateHelper"
 cp "$binary_dir/Minutes" "$app_dir/Contents/MacOS/Minutes"
 cp Resources/Info.plist "$app_dir/Contents/Info.plist"
-# Public Desktop OAuth application identity (never user access/refresh tokens).
+# Only public routing is bundled. The Google app secret stays on the server.
+python3 Checks/google_public_config.py Resources/GoogleOAuth.json --from-env
 if [[ -f Resources/GoogleOAuth.json ]]; then
   cp Resources/GoogleOAuth.json "$app_dir/Contents/Resources/GoogleOAuth.json"
 else
