@@ -1,4 +1,4 @@
-Minutes 2.8.0 improves the writing experience and public Google sign-in.
+Minutes 2.8.1 improves the writing experience and public Google sign-in.
 
 - Native rich-text notes editor with larger text, aligned placeholder/caret, headings, bold, italic, bullets and keyboard shortcuts. Stored notes continue to sync as native Notion blocks.
 - Cleaner lecture formatting instructions: subject headings, fewer generic subheadings, inline formulas, and optional brief overviews.

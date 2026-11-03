@@ -62,21 +62,24 @@ enum NotesEditorFormat {
             while end > start && [10, 13].contains(Int(text.character(at: end - 1))) { end -= 1 }
             let range = NSRange(location: start, length: end - start)
             let level = range.length > 0 ? (value.attribute(heading, at: start, effectiveRange: nil) as? Int ?? 0) : 0
+            var contentRange = range
             var line = ""
-            value.enumerateAttributes(in: range) { attrs, run, _ in
+            let plain = text.substring(with: range)
+            if let bullet = plain.range(of: "^(\\s*)• ", options: .regularExpression) {
+                let prefix = String(plain[bullet])
+                line = String(prefix.prefix(while: { $0.isWhitespace })) + "- "
+                contentRange.location += prefix.utf16.count; contentRange.length -= prefix.utf16.count
+            }
+            var open = ""
+            value.enumerateAttributes(in: contentRange) { attrs, run, _ in
                 let raw = text.substring(with: run)
                 let font = attrs[.font] as? NSFont ?? NSFont.systemFont(ofSize: bodySize)
                 let traits = NSFontManager.shared.traits(of: font)
-                if level > 0 { line += raw }
-                else if attrs[code] as? Bool == true { line += "`" + raw + "`" }
-                else {
-                    let marker = (traits.contains(.boldFontMask) ? "**" : "") + (traits.contains(.italicFontMask) ? "*" : "")
-                    line += marker + raw + String(marker.reversed())
-                }
+                let marker = level > 0 ? "" : attrs[code] as? Bool == true ? "`" : (traits.contains(.boldFontMask) ? "**" : "") + (traits.contains(.italicFontMask) ? "*" : "")
+                if marker != open { line += String(open.reversed()) + marker; open = marker }
+                line += raw
             }
-            if let bullet = line.range(of: "^(\\s*)• ", options: .regularExpression) {
-                line.replaceSubrange(bullet, with: String(line[bullet].prefix(while: { $0.isWhitespace })) + "- ")
-            }
+            line += String(open.reversed())
             if level > 0 { line = String(repeating: "#", count: min(3, level)) + " " + line }
             lines.append(line); start = NSMaxRange(paragraph)
         }
@@ -92,8 +95,16 @@ enum NotesEditorFormat {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if string.isEmpty {
-            var attrs = NotesEditorFormat.attributes; attrs[.foregroundColor] = NSColor.placeholderTextColor
-            (placeholder as NSString).draw(at: NSPoint(x: textContainerOrigin.x + (textContainer?.lineFragmentPadding ?? 0), y: textContainerOrigin.y), withAttributes: attrs)
+            var attrs = typingAttributes; attrs[.foregroundColor] = NSColor.placeholderTextColor
+            // Draw with TextKit too: NSString.draw uses different leading,
+            // which can place its baseline below an empty NSTextView caret.
+            let storage = NSTextStorage(string: placeholder, attributes: attrs)
+            let manager = NSLayoutManager()
+            let container = NSTextContainer(size: textContainer?.containerSize ?? bounds.size)
+            container.lineFragmentPadding = textContainer?.lineFragmentPadding ?? 5
+            storage.addLayoutManager(manager); manager.addTextContainer(container)
+            manager.ensureLayout(for: container)
+            manager.drawGlyphs(forGlyphRange: NSRange(location: 0, length: manager.numberOfGlyphs), at: textContainerOrigin)
         }
     }
     override func layout() { super.layout(); measure() }
@@ -103,10 +114,21 @@ enum NotesEditorFormat {
         heightChanged?(ceil(layoutManager.usedRect(for: textContainer).height + textContainerInset.height * 2 + 16))
         needsDisplay = true
     }
+    private func preserveFormattingUndo() {
+        guard let storage = textStorage else { return }
+        let original = NSAttributedString(attributedString: storage), selection = selectedRange()
+        undoManager?.registerUndo(withTarget: self) { view in
+            view.preserveFormattingUndo()
+            view.textStorage?.setAttributedString(original)
+            view.setSelectedRange(NSRange(location: min(selection.location, original.length), length: min(selection.length, max(0, original.length - selection.location))))
+            view.didChangeText(); view.measure()
+        }
+        undoManager?.setActionName("Format notes")
+    }
     func setHeading(_ level: Int) {
         let range = (string as NSString).paragraphRange(for: selectedRange())
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: level == 0 ? 16 : level == 1 ? 26 : level == 2 ? 22 : 18, weight: level == 0 ? .regular : .semibold), NotesEditorFormat.heading: level]
-        if range.length > 0, shouldChangeText(in: range, replacementString: nil) { textStorage?.addAttributes(attrs, range: range); didChangeText() }
+        if range.length > 0, shouldChangeText(in: range, replacementString: nil) { preserveFormattingUndo(); textStorage?.addAttributes(attrs, range: range); didChangeText() }
         typingAttributes = NotesEditorFormat.attributes.merging(attrs) { _, new in new }
         window?.makeFirstResponder(self); measure()
     }
@@ -115,6 +137,7 @@ enum NotesEditorFormat {
         let font = (range.length > 0 ? textStorage?.attribute(.font, at: range.location, effectiveRange: nil) : typingAttributes[.font]) as? NSFont ?? NSFont.systemFont(ofSize: 16)
         let removing = NSFontManager.shared.traits(of: font).contains(trait)
         if range.length > 0, shouldChangeText(in: range, replacementString: nil) {
+            preserveFormattingUndo()
             textStorage?.enumerateAttribute(.font, in: range) { value, run, _ in
                 let base = value as? NSFont ?? font
                 textStorage?.addAttribute(.font, value: removing ? NSFontManager.shared.convert(base, toNotHaveTrait: trait) : NSFontManager.shared.convert(base, toHaveTrait: trait), range: run)
@@ -195,14 +218,20 @@ private struct NativeNotesEditor: NSViewRepresentable {
         view.autoresizingMask = [.width]; view.textContainer?.widthTracksTextView = true
         view.textContainerInset = NSSize(width: 0, height: 4)
         view.font = NSFont.systemFont(ofSize: NotesEditorFormat.bodySize)
-        view.typingAttributes = NotesEditorFormat.attributes; view.allowsUndo = true
+        view.allowsUndo = true
         view.textStorage?.setAttributedString(NotesEditorFormat.attributed(text))
+        if text.isEmpty { view.typingAttributes = NotesEditorFormat.attributes }
         view.delegate = context.coordinator
         view.heightChanged = { value in DispatchQueue.main.async { if abs(height - value) > 1 { height = value } } }
         view.showFormatting = { formatting = true }
         scroll.documentView = view
         context.coordinator.lastMarkdown = text
-        DispatchQueue.main.async { editor = view; view.measure() }
+        DispatchQueue.main.async {
+            editor = view; view.measure()
+            if ProcessInfo.processInfo.arguments.contains("--preview-editor-empty") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { view.window?.makeFirstResponder(view) }
+            }
+        }
         return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
@@ -213,8 +242,13 @@ private struct NativeNotesEditor: NSViewRepresentable {
             view.textStorage?.setAttributedString(NotesEditorFormat.attributed(text))
             view.setSelectedRange(NSRange(location: min(selection.location, view.string.utf16.count), length: 0))
             context.coordinator.lastMarkdown = text
+            if text.isEmpty { view.typingAttributes = NotesEditorFormat.attributes }
         }
         view.measure()
+    }
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        guard let view = scroll.documentView as? NotesTextView else { return }
+        view.delegate = nil; view.heightChanged = nil; view.showFormatting = nil
     }
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: NativeNotesEditor

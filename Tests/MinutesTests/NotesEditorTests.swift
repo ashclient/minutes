@@ -10,6 +10,10 @@ final class NotesEditorTests: XCTestCase {
         XCTAssertTrue(rich.string.contains("• First"))
         XCTAssertEqual(NotesEditorFormat.markdown(rich), markdown)
     }
+    @MainActor func testBoldListContentKeepsItsNativeNotionListRole() {
+        let source = "- **Important condition**\n  - *Supporting detail*"
+        XCTAssertEqual(NotesEditorFormat.markdown(NotesEditorFormat.attributed(source)), source)
+    }
     @MainActor func testEmptyAndPlainNotesRemainEditableWithoutInsertingPlaceholder() {
         XCTAssertEqual(NotesEditorFormat.markdown(NotesEditorFormat.attributed("")), "")
         XCTAssertEqual(NotesEditorFormat.markdown(NotesEditorFormat.attributed("Line one\n\nLine three")), "Line one\n\nLine three")
