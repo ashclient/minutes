@@ -34,7 +34,7 @@ export function tokenFields(form, clientID) {
   } else if (!safe(form.get('refresh_token')) || form.get('refresh_token').length > 8192) return null;
   return new URLSearchParams(form);
 }
-export function createHandler(upstream = fetch) {
+export function createHandler(upstream = (...args) => globalThis.fetch(...args)) {
   return async function handle(request, env) {
     try {
       const url = new URL(request.url);
@@ -62,8 +62,8 @@ export function createHandler(upstream = fetch) {
       fields.set('client_secret', env.GOOGLE_CLIENT_SECRET);
       let response;
       try {
-        response = await upstream(GOOGLE_TOKEN_URL, {method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20000), headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: fields.toString()});
-      } catch { return failure('provider_unavailable', 502); }
+        response = await upstream(GOOGLE_TOKEN_URL, {method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(20000), headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: fields.toString()});
+      } catch (error) { return failure(error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'provider_timeout' : 'provider_transport_error', 502); }
       let data;
       try { data = JSON.parse(await boundedText(response.body, 65536)); }
       catch { return failure('provider_response_invalid', 502); }

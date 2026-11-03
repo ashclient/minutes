@@ -30,3 +30,7 @@ Official references:
 - https://developers.google.com/identity/protocols/oauth2/native-app
 - https://developers.cloudflare.com/workers/configuration/secrets/
 - https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
+
+## Current published service
+
+The publisher-operated endpoint is `https://minutes-sign-in.mlitw002.chatgpt.site/v1/token`. Its public source is tracked in a separate Sites repository; the standalone source here implements the same validation and fixed Google token exchange. The Sites adapter uses a bounded in-memory per-isolate limit of 60 requests/IP/minute (4096 entries, expiring keys), instead of the native Cloudflare rate-limit binding. It is an abuse control, not a global quota, and resets on cold starts. The application secret is supplied by private Sites runtime settings, never by the Mac build. Live-account consent/refresh still requires the account owner to connect.

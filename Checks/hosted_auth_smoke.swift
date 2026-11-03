@@ -1,7 +1,11 @@
 import Foundation
 
 @main struct HostedAuthSmoke {
-    static func main() async throws {
+    static func main() async {
+        do { try await run() }
+        catch { FileHandle.standardError.write(Data(("Hosted auth check failed: " + error.localizedDescription + "\n").utf8)); exit(1) }
+    }
+    static func run() async throws {
         let args = CommandLine.arguments
         guard args.count == 3, let base = URL(string: args[1]), base.scheme == "https" else { fatalError("Provide the deployed HTTPS origin and public client ID") }
         var health = URLRequest(url: base.appendingPathComponent("health")); health.timeoutInterval = 20

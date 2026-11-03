@@ -11,7 +11,7 @@ const tokens = {access_token:'synthetic-access', refresh_token:'synthetic-refres
 test('authorization code and PKCE reach only fixed Google token endpoint; no secret leaks', async () => {
  let calls=0;
  const handle=createHandler(async (url, options) => {
-  calls++;assert.equal(url,'https://oauth2.googleapis.com/token');assert.equal(options.redirect,'error');
+  calls++;assert.equal(url,'https://oauth2.googleapis.com/token');assert.equal(options.redirect,'manual');
   const form=new URLSearchParams(options.body);
   assert.equal(form.get('client_secret'),secret);assert.equal(form.get('code_verifier'),'x'.repeat(64));
   return Response.json({...tokens,client_secret:secret,debug:'private diagnostic',id_token:'not-needed'});
@@ -72,4 +72,9 @@ test('require exactly the read-only Calendar scopes and never proxy broader gran
   const result=await createHandler(async()=>Response.json({...tokens,scope}))(request(),env());
   assert.equal(result.status,403);assert(!('access_token' in await result.json()));
  }
+});
+
+test('upstream redirects are never followed or returned with credentials',async()=>{
+ const r=await createHandler(async(_,options)=>{assert.equal(options.redirect,'manual');return new Response('redirected',{status:302,headers:{Location:'https://evil.example/'}});})(request(),env());
+ assert.equal(r.status,502);assert(!(await r.text()).includes(secret));
 });
