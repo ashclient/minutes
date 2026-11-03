@@ -6,6 +6,18 @@ struct NotePart: Identifiable {
     let equation: Bool
 }
 enum NoteMath {
+    // Accept legacy model output while preserving currency such as $500.
+    // Inline dollar math must begin with a variable or TeX command, not money.
+    static let inlinePattern = #"\\\((.+?)\\\)|\$\$(.+?)\$\$|(?<!\\)\$(?!\$)([A-Za-z\\](?:[^$\n]*?\S)?)\$(?!\$)"#
+    static func inlineReadable(_ text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: inlinePattern) else { return readable(text) }
+        var result = text as NSString
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: result.length)).reversed() {
+            let range = (1..<match.numberOfRanges).map { match.range(at: $0) }.first { $0.location != NSNotFound }!
+            result = result.replacingCharacters(in: match.range, with: readable(result.substring(with: range))) as NSString
+        }
+        return readable(result as String)
+    }
     static func parts(_ markdown: String) -> [NotePart] {
         var result: [NotePart] = [], pending: [String] = []; var closing: String?
         func append(_ text: String, _ math: Bool) { result.append(NotePart(id: result.count, text: text, equation: math)) }
@@ -39,7 +51,7 @@ enum NoteMath {
             value = value.replacingOccurrences(of: #"\\sqrt\{([^{}]*)\}"#, with: "√($1)", options: .regularExpression)
             if value == before { break }
         }
-        for (a, b) in [("\\times", "×"), ("\\cdot", "·"), ("\\div", "÷"), ("\\sum", "Σ"), ("\\leq", "≤"), ("\\geq", "≥"), ("\\neq", "≠"), ("\\alpha", "α"), ("\\beta", "β"), ("\\theta", "θ"), ("\\pi", "π"), ("\\left", ""), ("\\right", ""), ("\\$", "$"), ("\\%", "%"), ("\\,", " "), ("\\(", ""), ("\\)", "")] { value = value.replacingOccurrences(of: a, with: b) }
+        for (a, b) in [("\\circ", "∘"), ("\\to", "→"), ("\\infty", "∞"), ("^{-1}", "⁻¹"), ("^2", "²"), ("\\times", "×"), ("\\cdot", "·"), ("\\div", "÷"), ("\\sum", "Σ"), ("\\leq", "≤"), ("\\geq", "≥"), ("\\neq", "≠"), ("\\alpha", "α"), ("\\beta", "β"), ("\\theta", "θ"), ("\\pi", "π"), ("\\left", ""), ("\\right", ""), ("\\$", "$"), ("\\%", "%"), ("\\,", " "), ("\\(", ""), ("\\)", "")] { value = value.replacingOccurrences(of: a, with: b) }
         for (a, b) in [("^2", "²"), ("^3", "³"), ("_{i}", "ᵢ"), ("_i", "ᵢ")] { value = value.replacingOccurrences(of: a, with: b) }
         return value
     }

@@ -211,10 +211,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             }
             VStack(alignment: .leading, spacing: 10) {
                 Text("Your notes").font(.system(size: 13, weight: .semibold))
-                ZStack(alignment: .topLeading) {
-                    if note.notes.isEmpty { Text("Write questions, reminders, or anything you want to keep…").font(.system(size: 14)).foregroundStyle(.tertiary).padding(.top, 8).padding(.leading, 5).allowsHitTesting(false) }
-                    TextEditor(text: Binding(get: { meeting?.notes ?? "" }, set: { value in store.update(note.id) { $0.notes = value } })).font(.system(size: 14)).lineSpacing(6).scrollContentBackground(.hidden).frame(minHeight: note.summary.isEmpty ? 220 : 130)
-                }
+                NotesEditor(text: Binding(get: { meeting?.notes ?? "" }, set: { value in store.update(note.id) { $0.notes = value } }), minimumHeight: note.summary.isEmpty ? 220 : 130).id(note.id)
             }
             if pipeline.activeID == note.id && !pipeline.liveDraft.isEmpty {
                 Divider()

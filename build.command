@@ -34,6 +34,12 @@ mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$app_dir/Conte
 cp "$binary_dir/MinutesUpdateHelper" "$app_dir/Contents/Helpers/MinutesUpdateHelper"
 cp "$binary_dir/Minutes" "$app_dir/Contents/MacOS/Minutes"
 cp Resources/Info.plist "$app_dir/Contents/Info.plist"
+# Public Desktop OAuth application identity (never user access/refresh tokens).
+if [[ -f Resources/GoogleOAuth.json ]]; then
+  cp Resources/GoogleOAuth.json "$app_dir/Contents/Resources/GoogleOAuth.json"
+else
+  rm -f "$app_dir/Contents/Resources/GoogleOAuth.json"
+fi
 cp Resources/Guide.html "$app_dir/Contents/Resources/Guide.html"
 if [[ -f Resources/AppIcon.icns ]]; then cp Resources/AppIcon.icns "$app_dir/Contents/Resources/"; fi
 # An ad-hoc signature permits a locally built app to run, but is not notarization.

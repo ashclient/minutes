@@ -52,7 +52,7 @@ final class CollaborativeEditingTests: XCTestCase {
     }
     @MainActor func testWorkerPoolClampsToFourAndRetainsSourceOrder() async throws {
         var active = 0, maximum = 0
-    var writingActive = 0, maximumWriters = 0, seen: [[NoteWorker]] = []
+        var seen: [[NoteWorker]] = []
         let values = try await NoteWorkerPool.map(Array(0..<12), limit: 99, activity: { seen.append($0) }, label: { "Passage \($0)" }) { _, index, value in
             active += 1; maximum = max(maximum, active); defer { active -= 1 }
             try await Task.sleep(nanoseconds: UInt64(12 - index) * 1_000_000)

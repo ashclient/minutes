@@ -4,46 +4,34 @@ import AppKit
 @MainActor struct GoogleSetup: View {
     @EnvironmentObject var calendar: CalendarMeetings
     @Environment(\.dismiss) private var dismiss
-    @State private var step = 0
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            HStack { Text("Connect Google Calendar").font(.title3).fontWeight(.semibold); Spacer(); Text("\(step + 1) of 3").font(.caption).foregroundStyle(.secondary); Button("Cancel") { calendar.cancelSignIn(); dismiss() } }
+            HStack { Text("Connect Google Calendar").font(.title3).fontWeight(.semibold); Spacer(); Button("Cancel") { calendar.cancelSignIn(); dismiss() } }
             Divider()
-            if step == 0 {
-                Text("Set up Google once").font(.system(size: 19, weight: .semibold))
-                Text("This private build needs a Google app registration before Google can show its sign-in screen. This step is required by Google.").font(.callout).foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("1. Enable Google Calendar API in a Google Cloud project.")
-                    Text("2. Set up consent and add your Google account as a test user.")
-                    Text("3. Create a Desktop app client and download its JSON file.")
-                }.font(.system(size: 13))
-                Link("Open Google setup ↗", destination: URL(string: "https://console.cloud.google.com/auth/clients")!).buttonStyle(.bordered)
-                Link("Google’s setup guide ↗", destination: URL(string: "https://developers.google.com/identity/protocols/oauth2/native-app#prerequisites")!).font(.caption)
-                Spacer()
-                HStack { Button("I already have the file…", action: importClient); Spacer(); Button("Next") { step = 1 }.buttonStyle(.borderedProminent) }
-            } else if step == 1 {
-                Text("Choose the Google setup file").font(.system(size: 19, weight: .semibold))
-                Text("Select the JSON file you downloaded from Google. Minutes will remember it, so you only do this once.").font(.callout).foregroundStyle(.secondary)
-                Button("Choose JSON file…", action: importClient).buttonStyle(.borderedProminent)
-                Spacer()
-                Button("Back") { step = 0 }
+            Text("Your meetings, in Minutes").font(.system(size: 21, weight: .semibold))
+            Text("Sign in with the Google account you use for your calendar. Choose which calendars appear after connecting.").foregroundStyle(.secondary)
+            Label("Read-only access to events and your calendar list", systemImage: "calendar")
+            Label("Minutes won’t create or change events", systemImage: "lock")
+            if calendar.configured {
+                Button(calendar.signingIn ? "Waiting for Google…" : "Sign in with Google") {
+                    Task { await calendar.connect(); if calendar.authorized { dismiss() } }
+                }.buttonStyle(.borderedProminent).controlSize(.large).disabled(calendar.signingIn)
             } else {
-                Text("Sign in to your calendar").font(.system(size: 19, weight: .semibold))
-                Text("Your browser will open. Choose the same Google account you use in Notion Calendar and allow calendar reading.").font(.callout).foregroundStyle(.secondary)
-                Button(calendar.signingIn ? "Waiting for Google…" : "Sign in with Google") { Task { await calendar.connect(); if calendar.authorized { dismiss() } } }.buttonStyle(.borderedProminent).disabled(calendar.signingIn)
-                Text("Minutes requests read-only access. It won’t change your events.").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Choose another setup file…", action: importClient).font(.caption)
+                Text("This build is missing Google sign-in configuration. Install the latest Minutes release.").foregroundStyle(.secondary)
             }
-            if !calendar.message.isEmpty { Text(calendar.message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-        }.padding(24).frame(width: 490, height: 560)
-        .onAppear { if calendar.configured { step = 2 } }
+            if !calendar.message.isEmpty { Text(calendar.message).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            Spacer()
+            DisclosureGroup("Advanced · custom app registration") {
+                Text("For developers or self-hosted builds only. Regular sign-in uses Minutes’ included app registration.").font(.caption).foregroundStyle(.secondary)
+                Button("Import a Desktop client…", action: importClient).disabled(calendar.signingIn)
+            }.font(.caption).foregroundStyle(.secondary)
+        }.padding(24).frame(width: 490, height: 420)
         .onDisappear { if calendar.signingIn { calendar.cancelSignIn() } }
     }
     private func importClient() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try calendar.importClient(Data(contentsOf: url)); step = 2 }
+        do { try calendar.importClient(Data(contentsOf: url)) }
         catch { calendar.message = error.localizedDescription }
     }
 }

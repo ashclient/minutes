@@ -2,3 +2,6 @@
 dist/
 .DS_Store
 .swiftpm/
+
+# Publisher-owned OAuth registration is optional; explicit distribution approval required.
+Resources/GoogleOAuth.json

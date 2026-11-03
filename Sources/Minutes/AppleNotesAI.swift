@@ -207,7 +207,7 @@ enum AppleTextBudget {
     }
     @available(macOS 26.0, *)
     fileprivate static func generate(_ text: String, instruction: String, tokens: Int, key cacheTag: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
-        let key = "lecture-v8:" + cacheTag + instruction + "\n" + text
+        let key = "lecture-v9:" + cacheTag + instruction + "\n" + text
         if let saved = completedSections[key] { partial(saved); return saved }
         // Plain-text streaming avoids schema parsing failures and their full retries.
         let attempt = await AsyncDeadline.run(seconds: 120) {

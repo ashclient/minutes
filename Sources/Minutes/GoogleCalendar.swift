@@ -7,6 +7,11 @@ import Security
 struct GoogleClientConfig: Codable {
     var client_id: String
     var client_secret: String?
+    static func bundled(in bundle: Bundle = .main) -> Self? {
+        guard let url = bundle.url(forResource: "GoogleOAuth", withExtension: "json"),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return try? imported(data)
+    }
     static func imported(_ data: Data) throws -> Self {
         struct Download: Decodable { let installed: GoogleClientConfig? }
         guard let client = try JSONDecoder().decode(Download.self, from: data).installed,
@@ -143,7 +148,7 @@ private final class GoogleCallbackConnection: @unchecked Sendable {
     private let signIn = GoogleSignIn()
     private var refreshing: Task<GoogleTokens, Error>?
     private var generation = 0
-    var configured: Bool { (try? CloudKey.contains(service: "google.client")) ?? false }
+    var configured: Bool { GoogleClientConfig.bundled() != nil || ((try? CloudKey.contains(service: "google.client")) ?? false) }
     var connected: Bool { (try? CloudKey.contains(service: "google.tokens")) ?? false }
     func importConfig(_ data: Data) throws {
         let value = try GoogleClientConfig.imported(data)
@@ -163,9 +168,16 @@ private final class GoogleCallbackConnection: @unchecked Sendable {
     }
     func disconnect() throws { generation += 1; signIn.cancel(); refreshing?.cancel(); refreshing = nil; try CloudKey.save("", service: "google.tokens") }
     private func loadConfig() throws -> GoogleClientConfig {
-        let raw = try CloudKey.read(service: "google.client")
-        guard !raw.isEmpty else { throw AppFailure("Import a Google Desktop OAuth client in Connections first.") }
-        return try JSONDecoder().decode(GoogleClientConfig.self, from: Data(raw.utf8))
+        // Keep existing imported clients: their refresh tokens are bound to
+        // that client ID. New installs use the packaged public Desktop client.
+        if try CloudKey.contains(service: "google.client") {
+            let raw = try CloudKey.read(service: "google.client")
+            if !raw.isEmpty { return try JSONDecoder().decode(GoogleClientConfig.self, from: Data(raw.utf8)) }
+        }
+        guard let shared = GoogleClientConfig.bundled() else {
+            throw AppFailure("Google sign-in is missing from this build. Install the latest Minutes release.")
+        }
+        return shared
     }
     private func save(_ tokens: GoogleTokens) throws { try CloudKey.save(String(decoding: JSONEncoder().encode(tokens), as: UTF8.self), service: "google.tokens") }
     private func access() async throws -> String {

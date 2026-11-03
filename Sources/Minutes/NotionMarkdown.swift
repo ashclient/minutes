@@ -3,7 +3,7 @@ import Foundation
 // Convert presentation into native Notion blocks; never send Markdown as one quote.
 enum NotionMarkdown {
     static func rich(_ text: String) -> [[String: Any]] {
-        let pattern = #"\\\((.+?)\\\)|\$\$(.+?)\$\$"#
+        let pattern = NoteMath.inlinePattern
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return plainRich(text) }
         let source = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: source.length))
@@ -11,7 +11,7 @@ enum NotionMarkdown {
         var output: [[String: Any]] = []; var cursor = 0
         for match in matches {
             output += plainRich(source.substring(with: NSRange(location: cursor, length: match.range.location - cursor)))
-            let range = match.range(at: 1).location != NSNotFound ? match.range(at: 1) : match.range(at: 2)
+            let range = (1..<match.numberOfRanges).map { match.range(at: $0) }.first { $0.location != NSNotFound }!
             let expression = source.substring(with: range)
             if expression.count <= 1000 { output.append(["type": "equation", "equation": ["expression": expression]]) }
             else { output += plainRich(NoteMath.readable(expression)) }

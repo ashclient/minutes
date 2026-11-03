@@ -25,14 +25,9 @@ Command-Q saves text immediately, cancels processing, and closes audio capture w
 
 Minutes 1.6 reads Google Calendar directly. It no longer reads macOS Calendar or iCloud, and does not request EventKit access. Existing notes are preserved.
 
-This private app does not contain an invented or shared OAuth client. A one-time Google Desktop OAuth client setup is required before browser sign-in works:
+Choose Connections → Google Calendar → Sign in with Google. A publisher-configured build can include a Desktop registration so users do not select a setup file. This release has the sign-in code ready, but shared registration is pending the owner’s distribution approval. Existing imported registrations work as before. Choose calendars after signing in. Existing imported clients continue to work; custom registration is tucked under Advanced for developers.
 
-1. Open a Google Cloud project and enable Google Calendar API.
-2. Configure the OAuth consent screen. For a project in Testing, add your Google account as a test user. Add the Calendar events read-only and Calendar list read-only scopes.
-3. Create a Desktop app OAuth client and download its JSON file.
-4. In Minutes → Connections → Google app setup, import that JSON, then click Connect Google and approve access in your browser. Choose which Google calendars appear.
-
-The local callback listener binds only to 127.0.0.1 on an ephemeral port. Sign-in uses PKCE S256, random state checking, a three-minute timeout and a Cancel button. Client configuration and access/refresh tokens are kept in macOS Keychain. OAuth testing-mode token expiry and Google verification policies still apply. There is no calendar-write scope. For a public distribution, the developer must register and configure the distribution&#x27;s Google OAuth client; that external setup has not been completed by this build.
+Sign-in opens your browser and uses PKCE S256, random state and a short-lived callback on 127.0.0.1. User access and refresh tokens stay in Keychain. Access is read-only. Google’s production consent, verification and account policies apply independently of the GitHub release.
 
 ## Connect Notion
 
@@ -51,7 +46,7 @@ In General, choose Apple Intelligence. This opt-in feature uses Apple&#x27;s Fou
 
 Summaries use Apple&#x27;s system model on the Mac with no API key and no bundled third-party model. Apple manages any required system-model download. Long transcripts are processed in fresh bounded sessions. Completed sections are joined without a second summarization pass, preserving the selected detail level; no raw source text is truncated. Experimental summaries can be less detailed than OpenRouter, and guardrails/context limits may reject a request. Errors retain the recording, transcript and existing notes. The app never silently switches an Apple summary to a cloud provider. Select OpenRouter explicitly if you want to use it instead.
 
-The Google Connect button is now always actionable: it opens the setup guide when app registration is missing. This UI change does not provision a Google OAuth client; that one-time developer registration remains required. The guide walks through registration, file import and browser sign-in one step at a time.
+Google Connect opens a simple browser sign-in screen. With a packaged Desktop registration, no setup-file import is needed. Without one, Advanced import remains available.
 
 ## Recording and AI
 
