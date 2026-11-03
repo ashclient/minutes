@@ -22,8 +22,8 @@ test('authorization code and PKCE reach only fixed Google token endpoint; no sec
 });
 test('refresh keeps token owner proof and does not require a browser session',async()=>{
  const form=new URLSearchParams({client_id:id,grant_type:'refresh_token',refresh_token:'private-refresh'});
- const result=await createHandler(async(_,opts)=>{assert.equal(new URLSearchParams(opts.body).get('refresh_token'),'private-refresh');return Response.json({access_token:'next',expires_in:3600});})(request(form),env());
- assert.equal(result.status,200);assert.deepEqual(await result.json(),{access_token:'next',expires_in:3600});
+ const result=await createHandler(async(_,opts)=>{assert.equal(new URLSearchParams(opts.body).get('refresh_token'),'private-refresh');return Response.json({access_token:'next',expires_in:3600,scope:tokens.scope});})(request(form),env());
+ assert.equal(result.status,200);assert.deepEqual(await result.json(),{access_token:'next',expires_in:3600,scope:tokens.scope});
 });
 test('reject unsupported grants, other client IDs, duplicates and caller-supplied secret/URLs before Google',async()=>{
  for(const mutate of [f=>f.set('grant_type','client_credentials'),f=>f.set('client_id','foreign'),f=>f.append('code','duplicate'),f=>f.set('client_secret','caller-value'),f=>f.set('token_endpoint','https://evil.example/')]){
@@ -65,4 +65,11 @@ test('reject malformed, truncated, oversized and incomplete provider responses',
 });
 test('health only indicates readiness, with no registration or token fields',async()=>{
  const r=await createHandler()(new Request('https://auth.example.com/health'),env());assert.deepEqual(await r.json(),{service:'minutes-google-auth',ready:true});
+});
+
+test('require exactly the read-only Calendar scopes and never proxy broader grants',async()=>{
+ for(const scope of [undefined,'https://www.googleapis.com/auth/calendar',tokens.scope+' https://www.googleapis.com/auth/drive.readonly',tokens.scope.split(' ')[0]]) {
+  const result=await createHandler(async()=>Response.json({...tokens,scope}))(request(),env());
+  assert.equal(result.status,403);assert(!('access_token' in await result.json()));
+ }
 });

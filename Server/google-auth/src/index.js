@@ -74,6 +74,9 @@ export function createHandler(upstream = fetch) {
         return failure('provider_unavailable', 502);
       }
       if (typeof data.access_token !== 'string' || !data.access_token || typeof data.expires_in !== 'number' || !Number.isFinite(data.expires_in) || data.expires_in <= 0 || (fields.get('grant_type') === 'authorization_code' && (typeof data.refresh_token !== 'string' || !data.refresh_token))) return failure('provider_response_invalid', 502);
+      const allowedScopes = new Set(['https://www.googleapis.com/auth/calendar.events.readonly', 'https://www.googleapis.com/auth/calendar.calendarlist.readonly']);
+      const granted = typeof data.scope === 'string' ? new Set(data.scope.split(/\s+/).filter(Boolean)) : new Set();
+      if (granted.size !== allowedScopes.size || [...granted].some(scope => !allowedScopes.has(scope))) return failure('calendar_permission_required', 403);
       // No provider diagnostics, client secret, or unrelated identity fields.
       const result = {access_token: data.access_token, expires_in: data.expires_in};
       for (const key of ['refresh_token', 'scope', 'token_type']) if (typeof data[key] === 'string') result[key] = data[key];

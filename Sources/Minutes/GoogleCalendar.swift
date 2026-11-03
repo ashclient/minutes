@@ -93,6 +93,7 @@ enum GoogleOAuth {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if status == 429 { throw AppFailure("Google sign-in is busy. Wait a minute and try again.") }
             if status == 401 || json["error"] as? String == "invalid_grant" { throw AppFailure("Google access expired or was revoked. Reconnect your account.") }
+            if json["error"] as? String == "calendar_permission_required" { throw AppFailure("Allow both read-only calendar permissions when connecting Google.") }
             if status == 503 { throw AppFailure("The Google sign-in service is not ready. Try again later; your notes are kept.") }
             throw AppFailure("Google authorization failed. Try connecting again.")
         }
