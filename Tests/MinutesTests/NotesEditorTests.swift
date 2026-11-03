@@ -64,7 +64,7 @@ final class NotesEditorTests: XCTestCase {
         try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
         let info: [String: Any] = ["CFBundleIdentifier": "test.minutes.oauth", "CFBundleName": "Test", "CFBundlePackageType": "BNDL"]
         try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: root.appendingPathComponent("Contents/Info.plist"))
-        let fixture = #"{"installed":{"client_id":"test.apps.googleusercontent.com","client_secret":"synthetic-desktop-value"}}"#
+        let fixture = #"{"installed":{"client_id":"test.apps.googleusercontent.com","token_proxy":"https://auth.example.com/v1/token"}}"#
         try Data(fixture.utf8).write(to: resources.appendingPathComponent("GoogleOAuth.json"))
         let bundle = try XCTUnwrap(Bundle(url: root))
         XCTAssertEqual(GoogleClientConfig.bundled(in: bundle)?.client_id, "test.apps.googleusercontent.com")

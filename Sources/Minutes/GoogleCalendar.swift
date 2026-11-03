@@ -7,15 +7,41 @@ import Security
 struct GoogleClientConfig: Codable {
     var client_id: String
     var client_secret: String?
+    var token_proxy: String?
+    var proxyURL: URL? { Self.proxyURL(token_proxy) }
+    static func proxyURL(_ raw: String?) -> URL? {
+        guard let raw, let url = URL(string: raw), let host = url.host, !host.isEmpty,
+              url.scheme == "https", url.user == nil, url.password == nil,
+              url.query == nil, url.fragment == nil, url.port == nil || url.port == 443,
+              url.path == "/v1/token", host != "localhost", !host.hasSuffix(".local"),
+              host.contains("."), host.range(of: "^[0-9.:]+$", options: .regularExpression) == nil else { return nil }
+        return url
+    }
+    static func preferred(imported: Self?, shared: Self?) -> Self? {
+        guard let imported else { return shared }
+        return shared?.client_id == imported.client_id ? shared : imported
+    }
+    func exchange(_ values: [String: String], session: URLSession = .shared) async throws -> [String: Any] {
+        var params = values
+        if token_proxy != nil {
+            guard let url = proxyURL else { throw AppFailure("The Google sign-in service address is invalid.") }
+            params.removeValue(forKey: "client_secret")
+            return try await GoogleOAuth.exchange(params, session: session, endpoint: url)
+        }
+        params["client_secret"] = client_secret
+        return try await GoogleOAuth.exchange(params, session: session)
+    }
     static func bundled(in bundle: Bundle = .main) -> Self? {
         guard let url = bundle.url(forResource: "GoogleOAuth", withExtension: "json"),
               let data = try? Data(contentsOf: url) else { return nil }
-        return try? imported(data)
+        guard let value = try? imported(data), value.client_secret == nil, value.proxyURL != nil else { return nil }
+        return value
     }
     static func imported(_ data: Data) throws -> Self {
         struct Download: Decodable { let installed: GoogleClientConfig? }
         guard let client = try JSONDecoder().decode(Download.self, from: data).installed,
-              client.client_id.hasSuffix(".apps.googleusercontent.com") else { throw AppFailure("Choose Google's downloaded Desktop app OAuth JSON file.") }
+              client.client_id.hasSuffix(".apps.googleusercontent.com"),
+              client.token_proxy == nil || (client.proxyURL != nil && client.client_secret == nil) else { throw AppFailure("Choose Google's downloaded Desktop app OAuth JSON file.") }
         return client
     }
 }
@@ -57,14 +83,25 @@ enum GoogleOAuth {
               let lifetime = response["expires_in"] as? Double else { throw AppFailure("Google did not provide offline calendar access. Connect again and allow calendar reading.") }
         return GoogleTokens(access: access, refresh: refresh, expires: Date().addingTimeInterval(lifetime))
     }
-    static func exchange(_ values: [String: String], session: URLSession = .shared) async throws -> [String: Any] {
-        var request = URLRequest(url: URL(string: "https://oauth2.googleapis.com/token")!); request.httpMethod = "POST"; request.timeoutInterval = 30
+    static func exchange(_ values: [String: String], session: URLSession = .shared, endpoint: URL = URL(string: "https://oauth2.googleapis.com/token")!) async throws -> [String: Any] {
+        var request = URLRequest(url: endpoint); request.httpMethod = "POST"; request.timeoutInterval = 30
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type"); request.httpBody = form(values)
-        let (data, response) = try await session.data(for: request)
+        request.httpShouldHandleCookies = false; request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try await session.data(for: request, delegate: GoogleTokenRedirectPolicy())
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else { throw AppFailure("Google authorization failed. Reconnect your account, and check that the Calendar API is enabled for your OAuth client.") }
+        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if status == 429 { throw AppFailure("Google sign-in is busy. Wait a minute and try again.") }
+            if status == 401 || json["error"] as? String == "invalid_grant" { throw AppFailure("Google access expired or was revoked. Reconnect your account.") }
+            if status == 503 { throw AppFailure("The Google sign-in service is not ready. Try again later; your notes are kept.") }
+            throw AppFailure("Google authorization failed. Try connecting again.")
+        }
         return json
     }
+}
+
+private final class GoogleTokenRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) { completionHandler(nil) }
 }
 
 // A short-lived loopback listener accepts Google's redirect. No credentials or
@@ -160,19 +197,21 @@ private final class GoogleCallbackConnection: @unchecked Sendable {
         let expected = generation
         let config = try loadConfig(); let verifier = try GoogleOAuth.random(); let state = try GoogleOAuth.random()
         let (code, redirect) = try await signIn.authorize(config, verifier: verifier, state: state)
-        var values = ["client_id": config.client_id, "code": code, "code_verifier": verifier, "redirect_uri": redirect, "grant_type": "authorization_code"]
-        values["client_secret"] = config.client_secret
-        let response = try await GoogleOAuth.exchange(values)
+        let values = ["client_id": config.client_id, "code": code, "code_verifier": verifier, "redirect_uri": redirect, "grant_type": "authorization_code"]
+        let response = try await config.exchange(values)
         guard expected == generation else { throw CancellationError() }
         try save(GoogleOAuth.tokens(response))
     }
     func disconnect() throws { generation += 1; signIn.cancel(); refreshing?.cancel(); refreshing = nil; try CloudKey.save("", service: "google.tokens") }
     private func loadConfig() throws -> GoogleClientConfig {
         // Keep existing imported clients: their refresh tokens are bound to
-        // that client ID. New installs use the packaged public Desktop client.
+        // that client ID. Same-ID connections can move to hosted exchange.
         if try CloudKey.contains(service: "google.client") {
             let raw = try CloudKey.read(service: "google.client")
-            if !raw.isEmpty { return try JSONDecoder().decode(GoogleClientConfig.self, from: Data(raw.utf8)) }
+            if !raw.isEmpty {
+                let saved = try JSONDecoder().decode(GoogleClientConfig.self, from: Data(raw.utf8))
+                return GoogleClientConfig.preferred(imported: saved, shared: GoogleClientConfig.bundled())!
+            }
         }
         guard let shared = GoogleClientConfig.bundled() else {
             throw AppFailure("Google sign-in is missing from this build. Install the latest Minutes release.")
@@ -189,9 +228,8 @@ private final class GoogleCallbackConnection: @unchecked Sendable {
         if let refreshing { return try await refreshing.value.access }
         let config = try loadConfig()
         let task = Task { () throws -> GoogleTokens in
-            var values = ["client_id": config.client_id, "refresh_token": saved.refresh, "grant_type": "refresh_token"]
-            values["client_secret"] = config.client_secret
-            return try GoogleOAuth.tokens(await GoogleOAuth.exchange(values), oldRefresh: saved.refresh)
+            let values = ["client_id": config.client_id, "refresh_token": saved.refresh, "grant_type": "refresh_token"]
+            return try GoogleOAuth.tokens(await config.exchange(values), oldRefresh: saved.refresh)
         }
         refreshing = task; defer { refreshing = nil }
         let updated = try await task.value

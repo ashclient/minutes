@@ -17,12 +17,12 @@ import AppKit
                     Task { await calendar.connect(); if calendar.authorized { dismiss() } }
                 }.buttonStyle(.borderedProminent).controlSize(.large).disabled(calendar.signingIn)
             } else {
-                Text("This build is missing Google sign-in configuration. Install the latest Minutes release.").foregroundStyle(.secondary)
+                Text("Google sign-in has not been enabled by the publisher for this build. Existing custom connections still work.").foregroundStyle(.secondary)
             }
             if !calendar.message.isEmpty { Text(calendar.message).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             Spacer()
             DisclosureGroup("Advanced · custom app registration") {
-                Text("For developers or self-hosted builds only. Regular sign-in uses Minutes’ included app registration.").font(.caption).foregroundStyle(.secondary)
+                Text("For developers or self-hosted builds only. Regular sign-in uses Minutes’ hosted sign-in service.").font(.caption).foregroundStyle(.secondary)
                 Button("Import a Desktop client…", action: importClient).disabled(calendar.signingIn)
             }.font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(width: 490, height: 420)
