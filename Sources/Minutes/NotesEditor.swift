@@ -151,11 +151,19 @@ enum NotesEditorFormat {
         let text = (string as NSString).substring(with: range)
         let lines = text.components(separatedBy: "\n")
         let remove = lines.filter { !$0.isEmpty }.allSatisfy { $0.hasPrefix("• ") }
-        let replacement = lines.enumerated().map { index, line in
-            if line.isEmpty && index == lines.count - 1 && lines.count > 1 { return line }
-            return remove ? String(line.dropFirst(2)) : "• " + line
-        }.joined(separator: "\n")
+        guard let storage = textStorage else { return }
+        let replacement = NSMutableAttributedString(attributedString: storage.attributedSubstring(from: range))
+        var offsets: [Int] = [], offset = 0
+        for (index, line) in lines.enumerated() {
+            if !(line.isEmpty && index == lines.count - 1 && lines.count > 1) { offsets.append(offset) }
+            offset += line.utf16.count + 1
+        }
+        for location in offsets.reversed() {
+            if remove { replacement.deleteCharacters(in: NSRange(location: location, length: 2)) }
+            else { replacement.insert(NSAttributedString(string: "• ", attributes: NotesEditorFormat.attributes), at: location) }
+        }
         insertText(replacement, replacementRange: range); window?.makeFirstResponder(self)
+
     }
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "b" { toggleTrait(.boldFontMask); return }

@@ -14,6 +14,16 @@ final class NotesEditorTests: XCTestCase {
         let source = "- **Important condition**\n  - *Supporting detail*"
         XCTAssertEqual(NotesEditorFormat.markdown(NotesEditorFormat.attributed(source)), source)
     }
+    @MainActor func testListToolbarDoesNotEraseExistingEmphasis() {
+        let view = NotesTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
+        view.textStorage?.setAttributedString(NotesEditorFormat.attributed("**Important** condition"))
+        view.setSelectedRange(NSRange(location: 0, length: view.string.utf16.count))
+        view.toggleList()
+        XCTAssertEqual(NotesEditorFormat.markdown(view.textStorage!), "- **Important** condition")
+        view.setSelectedRange(NSRange(location: 0, length: view.string.utf16.count))
+        view.toggleList()
+        XCTAssertEqual(NotesEditorFormat.markdown(view.textStorage!), "**Important** condition")
+    }
     @MainActor func testEmptyAndPlainNotesRemainEditableWithoutInsertingPlaceholder() {
         XCTAssertEqual(NotesEditorFormat.markdown(NotesEditorFormat.attributed("")), "")
         XCTAssertEqual(NotesEditorFormat.markdown(NotesEditorFormat.attributed("Line one\n\nLine three")), "Line one\n\nLine three")
