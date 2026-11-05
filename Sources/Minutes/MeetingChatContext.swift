@@ -36,12 +36,20 @@ enum MeetingChatContext {
         let recentText = prefix(recent, bytes: limit / 3)
         var remaining = limit - recentText.utf8.count
         var chosen: [(Int, String)] = []
-        let ranked = passages.enumerated().map { index, text in
-            (index, text, terms.reduce(0) { $0 + (text.lowercased().contains($1) ? 1 : 0) })
-        }.sorted { $0.2 == $1.2 ? $0.0 > $1.0 : $0.2 > $1.2 }
-        for (index, text, _) in ranked where remaining > 80 {
-            let excerpt = prefix(text, bytes: remaining)
-            chosen.append((index, excerpt)); remaining -= excerpt.utf8.count + 1
+        var ranked: [(index: Int, text: String, score: Int)] = []
+        for (index, text) in passages.enumerated() {
+            let lower = text.lowercased()
+            var score = 0
+            for term in terms where lower.contains(term) { score += 1 }
+            ranked.append((index: index, text: text, score: score))
+        }
+        ranked.sort { left, right in
+            if left.score != right.score { return left.score > right.score }
+            return left.index > right.index
+        }
+        for passage in ranked where remaining > 80 {
+            let excerpt = prefix(passage.text, bytes: remaining)
+            chosen.append((passage.index, excerpt)); remaining -= excerpt.utf8.count + 1
         }
         let evidence = chosen.sorted { $0.0 < $1.0 }.map(\.1).joined(separator: "\n")
         let conversation = prefix(history.map { "\($0.role): \($0.text)" }.joined(separator: "\n"), bytes: local ? 450 : 3500)
