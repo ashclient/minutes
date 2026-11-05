@@ -61,7 +61,8 @@ final class MeetingChatTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = Store(root: root); let first = try XCTUnwrap(store.create())
-        store.update(first) { $0.notes = "Inventory lecture"; $0.notionNeedsSync = false }
+        store.update(first) { $0.notes = "Inventory lecture" }
+        store.update(first) { $0.notionNeedsSync = false }
         let other = try XCTUnwrap(store.create())
         let chat = MeetingChat(answer: { _, _, _, partial in partial("Inventory"); await Task.yield(); return "Inventory answer" })
         chat.ask("What did I miss?", id: first, store: store, appleBusy: false)
