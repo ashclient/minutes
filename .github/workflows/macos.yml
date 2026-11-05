@@ -3,7 +3,7 @@ on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: write
 concurrency:
-  group: minutes-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: minutes-checked-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 jobs:
   cleanup:
@@ -23,10 +23,15 @@ jobs:
             --jq ".workflow_runs[] | select(.name == \"Build Minutes for Mac\" and .head_sha != \"$BUILD_SHA\" and (.status == \"queued\" or .status == \"in_progress\")) | .id" |
           while IFS= read -r run_id; do
             gh api --method POST "repos/$GH_REPO/actions/runs/$run_id/cancel" >/dev/null || true
+            sleep 5
+            status=$(gh api "repos/$GH_REPO/actions/runs/$run_id" --jq .status)
+            if [ "$status" != completed ]; then
+              gh api --method POST "repos/$GH_REPO/actions/runs/$run_id/force-cancel" >/dev/null || true
+            fi
           done
   build:
     needs: cleanup
-    if: always() && (needs.cleanup.result == 'success' || needs.cleanup.result == 'skipped')
+    if: ${{ !cancelled() && (needs.cleanup.result == 'success' || needs.cleanup.result == 'skipped') }}
     runs-on: macos-26
     timeout-minutes: 25
     steps:
