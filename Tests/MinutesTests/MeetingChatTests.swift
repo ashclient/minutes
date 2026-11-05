@@ -26,6 +26,15 @@ final class MeetingChatTests: XCTestCase {
         XCTAssertTrue(prompt.contains("[03:20]"))
         XCTAssertLessThan(prompt.utf8.count, 3800)
     }
+    func testRecentSpeechUsesEndOfLongLiveTranscriptRatherThanItsBeginning() {
+        var meeting = Meeting()
+        meeting.transcript = [TranscriptLine(seconds: 0, source: "Mic", text: String(repeating: "Old lecture material. ", count: 10000) + "The new homework is chapter nine.")]
+        let prompt = MeetingChatContext.prompt(meeting: meeting, question: "What did I just miss?", local: true)
+        let recent = prompt.components(separatedBy: "RECENT TRANSCRIPT:").last ?? ""
+        XCTAssertTrue(recent.contains("The new homework is chapter nine."))
+        XCTAssertTrue(recent.contains("[00:00] Mic:"))
+        XCTAssertLessThan(recent.utf8.count, 800)
+    }
     func testUnicodeBudgetDoesNotSplitScalars() {
         XCTAssertEqual(MeetingChatContext.prefix("😀éABC", bytes: 5), "😀")
         var meeting = Meeting(); meeting.notes = String(repeating: "你好😀", count: 5000)

@@ -31,7 +31,8 @@ import SwiftUI
         activeID = id; draft = ""
         let cloud = provider.cloud
         let model = cloud?.model
-        let context = meeting.transcript.last.map { "Transcript excerpts through \($0.timestamp) · \(provider == .apple ? "Apple Intelligence" : cloud!.title)" } ?? "Personal notes · \(provider == .apple ? "Apple Intelligence" : cloud!.title)"
+        let providerName = provider == .apple ? "Apple Intelligence" : cloud!.title
+        let context = (meeting.transcript.isEmpty ? "Personal notes" : "Transcript snapshot · segment-start timestamps") + " · " + providerName
         store.update(id) { $0.chatMessages = ($0.chatMessages ?? []) + [MeetingChatMessage(role: "user", text: question)] }
         job = Task { [weak self] in
             guard let self else { return }
