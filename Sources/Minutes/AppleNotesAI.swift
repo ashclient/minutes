@@ -1,7 +1,7 @@
 import Foundation
 import FoundationModels
 
-enum NotesAIProvider: String {
+enum NotesAIProvider: String, Sendable {
     case openRouter = "openrouter"
     case apple = "apple"
     case nvidia
@@ -62,6 +62,26 @@ enum AppleTextBudget {
 }
 @MainActor enum AppleNotesAI {
     private static var completedSections: [String: String] = [:]
+    static func answerQuestion(_ prompt: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
+        let availability = AppleAIAvailability.current
+        guard availability.available else { throw AppFailure(availability.message) }
+        guard #available(macOS 27.0, *) else { throw AppFailure("Apple Intelligence requires macOS 27 or newer.") }
+        let result = await AsyncDeadline.run(seconds: 90) {
+            let session = LanguageModelSession(instructions: MeetingChatContext.instruction)
+            var output = "", last = Date.distantPast
+            for try await snapshot in session.streamResponse(to: prompt, options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 600)) {
+                try Task.checkCancellation(); output = snapshot.content
+                if Date().timeIntervalSince(last) > 0.08 { partial(output); last = Date() }
+            }
+            try Task.checkCancellation()
+            guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AppFailure("Apple returned an empty reply. Try asking again.") }
+            partial(output); return output
+        }
+        try Task.checkCancellation()
+        guard let result else { throw AppFailure("Apple Intelligence took too long. Try a shorter question.") }
+        return try result.get()
+    }
+
     static func summarize(_ source: String, length: NotesLength = .complete, format: StudyFormat = .outline, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void, partial: @escaping @MainActor (String) -> Void = { _ in }, activity: @escaping @MainActor ([NoteWorker]) -> Void = { _ in }, sections: @escaping @MainActor ([LiveNoteSection]) -> Void = { _ in }) async throws -> SummaryResult {
         let availability = AppleAIAvailability.current
         guard availability.available else { throw AppFailure(availability.message) }

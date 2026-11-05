@@ -223,6 +223,14 @@ struct AIClient: Sendable {
         return try Self.decode(data, status: response.statusCode, provider: provider)
         #endif
     }
+    func answerQuestion(_ prompt: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
+        var request = try Self.request(key: apiKey, system: MeetingChatContext.instruction, text: prompt, provider: provider, markdown: true, streaming: true, model: model)
+        var body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+        body["max_tokens"] = 900
+        body["messages"] = [["role": "system", "content": MeetingChatContext.instruction], ["role": "user", "content": prompt]]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await stream(request, partial: partial).summary
+    }
     func checkConnection() async throws {
         var request = try Self.request(key: apiKey, system: "This is a connection test. No private data is supplied.", text: "Reply only with OK.", provider: provider, markdown: true, model: model)
         request.timeoutInterval = 45

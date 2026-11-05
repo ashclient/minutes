@@ -21,6 +21,7 @@ struct Meeting: Sendable, Identifiable, Codable, Equatable {
     var notebook = "Meetings"
     var notes = ""
     var summary = ""
+    var chatMessages: [MeetingChatMessage]? = nil
     var actions: [ActionItem] = []
     var transcript: [TranscriptLine] = []
     var audioFiles: [String] = []
