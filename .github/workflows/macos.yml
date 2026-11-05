@@ -7,7 +7,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   cleanup:
-    if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -16,11 +16,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          BUILD_BRANCH: ${{ github.ref_name }}
-          BUILD_SHA: ${{ github.sha }}
+          BUILD_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           gh api --method GET "repos/$GH_REPO/actions/runs" -f branch="$BUILD_BRANCH" -f per_page=100 \
-            --jq '.workflow_runs[] | select(.name == "Build Minutes for Mac" and .head_sha != env.BUILD_SHA and (.status == "queued" or .status == "in_progress")) | .id' |
+            --jq ".workflow_runs[] | select(.name == \"Build Minutes for Mac\" and .head_sha != \"$BUILD_SHA\" and (.status == \"queued\" or .status == \"in_progress\")) | .id" |
           while IFS= read -r run_id; do
             gh api --method POST "repos/$GH_REPO/actions/runs/$run_id/cancel" >/dev/null || true
           done
