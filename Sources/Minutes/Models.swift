@@ -13,6 +13,13 @@ struct TranscriptLine: Sendable, Identifiable, Codable, Equatable {
     var text: String
     var timestamp: String { String(format: "%02d:%02d", Int(seconds) / 60, Int(seconds) % 60) }
 }
+struct MeetingChatMessage: Identifiable, Codable, Equatable, Sendable {
+    var id = UUID()
+    var role: String
+    var text: String
+    var context: String? = nil
+}
+
 struct Meeting: Sendable, Identifiable, Codable, Equatable {
     var id = UUID()
     var title = "Untitled meeting"
