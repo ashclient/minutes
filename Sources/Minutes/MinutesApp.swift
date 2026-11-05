@@ -6,18 +6,19 @@ import AppKit
     @StateObject private var recorder = Recorder()
     @StateObject private var pipeline = MeetingPipeline()
     @StateObject private var calendar = CalendarMeetings()
+    @StateObject private var chat = MeetingChat()
     init() { UserDefaults.standard.register(defaults: ["includeComputer": false, "notionAutoSync": true]) }
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     var body: some Scene {
         Window("Minutes", id: "main") {
             WorkspaceView()
-                .environmentObject(store).environmentObject(recorder).environmentObject(pipeline).environmentObject(calendar)
+                .environmentObject(store).environmentObject(recorder).environmentObject(pipeline).environmentObject(calendar).environmentObject(chat)
                 .frame(minWidth: 850, minHeight: 560)
                 .task { await AppUpdater.shared.checkIfDue() }
                 .onAppear {
-                    AppUpdater.shared.idle = { !recorder.recording && !pipeline.working && pipeline.draftDecisionID == nil && pipeline.finishID == nil && NotionSync.shared.syncing.isEmpty && !store.busy }
+                    AppUpdater.shared.idle = { !chat.busy && !recorder.recording && !pipeline.working && pipeline.draftDecisionID == nil && pipeline.finishID == nil && NotionSync.shared.syncing.isEmpty && !store.busy }
                     AppUpdater.shared.save = { store.saveNow() }
-                    delegate.store = store; delegate.recorder = recorder; delegate.pipeline = pipeline; delegate.floating.configure(store: store, recorder: recorder, pipeline: pipeline) }
+                    delegate.chat = chat; delegate.store = store; delegate.recorder = recorder; delegate.pipeline = pipeline; delegate.floating.configure(store: store, recorder: recorder, pipeline: pipeline) }
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1080, height: 760)
@@ -47,6 +48,7 @@ import AppKit
     }
 }
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
+    weak var chat: MeetingChat?
     weak var store: Store?
     weak var recorder: Recorder?
     weak var pipeline: MeetingPipeline?
@@ -56,7 +58,7 @@ import AppKit
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !quitting else { return .terminateLater }
-        store?.saveNow()
+        if let store { chat?.saveForQuit(store: store) }; store?.saveNow()
         guard recorder?.recording == true || store?.busy == true else { return .terminateNow }
         quitting = true
         if let store, let recorder { pipeline?.prepareForQuit(store: store, recorder: recorder) }

@@ -152,7 +152,7 @@ struct AIClient: Sendable {
         }
         throw CloudFormatFailure()
     }
-    private func stream(_ request: URLRequest, partial: @escaping @MainActor (String) -> Void) async throws -> SummaryResult {
+    private func stream(_ request: URLRequest, reply: Bool = false, partial: @escaping @MainActor (String) -> Void) async throws -> SummaryResult {
         #if os(macOS)
         for attempt in 0...1 {
             try Task.checkCancellation()
@@ -180,7 +180,7 @@ struct AIClient: Sendable {
                         try Task.checkCancellation(); data.append(byte)
                         if data.count > 4_000_000 { throw CloudFormatFailure() }
                     }
-                    let result = try Self.decode(data, status: 200, provider: provider)
+                    let result = reply ? SummaryResult(summary: try Self.decodeReply(data), decisions: [], actions: []) : try Self.decode(data, status: 200, provider: provider)
                     await partial(result.summary); return result
                 }
                 var decoder = CloudEventStream()
@@ -198,7 +198,7 @@ struct AIClient: Sendable {
                         guard let line = String(data: lineBytes, encoding: .utf8) else { throw CloudFormatFailure() }
                         lineBytes.removeAll(keepingCapacity: true)
                         try decoder.line(line)
-                        if Date().timeIntervalSince(lastUpdate) >= 0.08, let preview = decoder.preview {
+                        if Date().timeIntervalSince(lastUpdate) >= 0.08, let preview = reply ? try? Self.cleanReply(decoder.content) : decoder.preview {
                             await partial(preview); lastUpdate = Date()
                         }
                         if decoder.done { break }
@@ -208,7 +208,7 @@ struct AIClient: Sendable {
                         try decoder.line(line.trimmingCharacters(in: .newlines))
                     }
                     try Task.checkCancellation()
-                    let result = try decoder.finish(provider: provider)
+                    let result = reply ? SummaryResult(summary: try decoder.finishReply(), decisions: [], actions: []) : try decoder.finish(provider: provider)
                     await partial(result.summary)
                     return result
                 } catch {
@@ -222,6 +222,34 @@ struct AIClient: Sendable {
         let (data, response) = try await send(request)
         return try Self.decode(data, status: response.statusCode, provider: provider)
         #endif
+    }
+    static func cleanReply(_ text: String) throws -> String {
+        var text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.contains("<think>") {
+            guard text.contains("</think>") else { throw CloudFormatFailure() }
+            text = text.replacingOccurrences(of: "(?s)<think>.*?</think>", with: "", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard !text.isEmpty, !text.contains("<think>"), !text.contains("</think>") else { throw CloudFormatFailure() }
+        return text
+    }
+    static func decodeReply(_ data: Data) throws -> String {
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["error"] == nil, let choice = (object["choices"] as? [[String: Any]])?.first,
+              choice["finish_reason"] as? String == "stop",
+              let message = choice["message"] as? [String: Any], let content = message["content"] as? String else { throw CloudFormatFailure() }
+        return try cleanReply(content)
+    }
+    static func questionRequest(key: String, prompt: String, provider: CloudAIProvider, model: String?) throws -> URLRequest {
+        var request = try Self.request(key: key, system: MeetingChatContext.instruction, text: prompt, provider: provider, markdown: true, streaming: true, model: model)
+        var body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+        body["max_tokens"] = 900
+        body["messages"] = [["role": "system", "content": MeetingChatContext.instruction], ["role": "user", "content": prompt]]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+    func answerQuestion(_ prompt: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
+        let request = try Self.questionRequest(key: apiKey, prompt: prompt, provider: provider, model: model)
+        return try await stream(request, reply: true, partial: partial).summary
     }
     func checkConnection() async throws {
         var request = try Self.request(key: apiKey, system: "This is a connection test. No private data is supplied.", text: "Reply only with OK.", provider: provider, markdown: true, model: model)
@@ -332,6 +360,11 @@ struct CloudEventStream {
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !text.hasPrefix("<"), !text.hasPrefix("{"), !text.hasPrefix("["), !text.hasPrefix("\""), !text.hasPrefix("```") else { return nil }
         return text
+    }
+    mutating func finishReply() throws -> String {
+        try dispatch()
+        guard done, terminal == "stop" else { throw AppFailure("The reply was interrupted. Any partial answer has been kept.") }
+        return try AIClient.cleanReply(content)
     }
     mutating func finish(provider: CloudAIProvider) throws -> SummaryResult {
         try dispatch()

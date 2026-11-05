@@ -12,6 +12,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
     @ObservedObject private var notion = NotionSync.shared
     @ObservedObject private var updater = AppUpdater.shared
     @AppStorage("includeComputer") private var includeComputer = false
+    @State private var chatOpen = false
     @State private var sidebar = true
     @State private var showCalendar = false
     @State private var setup: SettingsRoute?
@@ -43,6 +44,10 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                     footer
                 }
             }.background(Color(nsColor: .textBackgroundColor))
+            if chatOpen, !showCalendar, let meeting {
+                Divider()
+                MeetingChatView(id: meeting.id) { chatOpen = false }.id(meeting.id).frame(width: 340)
+            }
         }.tint(Color.primary)
         .confirmationDialog("Keep the notes generated so far?", isPresented: Binding(get: { pipeline.draftDecisionID != nil }, set: { _ in })) {
             Button("Keep partial notes") { pipeline.resolveDraft(keep: true, store: store) }
@@ -86,6 +91,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                 pipeline.showProgressPreview(id: id)
                 if ProcessInfo.processInfo.arguments.contains("--preview-progress-background"), let other = store.meetings.first(where: { $0.id != id }) { store.selectedID = other.id }
             }
+            if ProcessInfo.processInfo.arguments.contains("--preview-chat") { chatOpen = true; sidebar = false }
             if ProcessInfo.processInfo.arguments.contains("--preview-calendar") { showCalendar = true }
             if ProcessInfo.processInfo.arguments.contains("--preview-finish") || ProcessInfo.processInfo.arguments.contains("--preview-delivery"), let id = store.selectedID { pipeline.finishID = id }
             if ProcessInfo.processInfo.arguments.contains("--preview-connections") || (ProcessInfo.processInfo.arguments.contains("--preview-notion") || ProcessInfo.processInfo.arguments.contains("--preview-notion-destination")) || ProcessInfo.processInfo.arguments.contains("--preview-google") { openSettings("Connections") }
@@ -180,6 +186,8 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             Button { withAnimation(.easeInOut(duration: 0.18)) { sidebar.toggle() } } label: { Image(systemName: "sidebar.left") }.help("Toggle sidebar").accessibilityLabel("Toggle sidebar")
             Text(showCalendar ? "Calendar" : meeting?.eventCalendar ?? "Notes").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1); Spacer()
             if let meeting, !showCalendar {
+                Button { chatOpen.toggle(); if chatOpen { sidebar = false } } label: { Label("Ask", systemImage: "bubble.right") }
+                    .help("Ask questions using this meeting’s live transcript").accessibilityLabel("Ask this meeting")
                 if let raw = meeting.notionURL, let url = URL(string: raw) { Link(destination: url) { Label("Open in Notion", systemImage: "arrow.up.right").font(.system(size: 11)) } }
                 Menu {
                     Button("Export notes…") { store.export(meeting) }

@@ -39,7 +39,7 @@ import UpdateSupport
     }
     func install() async {
         guard let release = available, !downloading else { return }
-        guard idle() else { message = "Finish recording, processing and Notion sync before installing."; return }
+        guard idle() else { message = "Finish recording, AI replies, processing and Notion sync before installing."; return }
         let destination = Bundle.main.bundleURL
         guard destination.pathExtension == "app", !destination.path.contains("/AppTranslocation/"), FileManager.default.isWritableFile(atPath: destination.deletingLastPathComponent().path) else { message = "Move Minutes to a writable Applications folder before updating."; return }
         downloading = true; message = "Downloading and verifying update…"; defer { downloading = false }

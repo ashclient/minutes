@@ -24,6 +24,34 @@ private final class OKStub: URLProtocol {
     override func stopLoading() {}
 }
 final class CloudStreamingTests: XCTestCase {
+    @MainActor func testMeetingQuestionsStreamThroughBothCloudProviders() async throws {
+        for provider in [CloudAIProvider.openRouter, .nvidia] {
+            let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [StreamingStub.self]
+            let session = URLSession(configuration: config); defer { session.invalidateAndCancel() }
+            var drafts: [String] = []
+            let answer = try await AIClient(apiKey: "synthetic", session: session, provider: provider).answerQuestion("What was the condition?", partial: { drafts.append($0) })
+            XCTAssertTrue(answer.contains("necessary condition"))
+            XCTAssertTrue(drafts.contains("## Café"))
+            XCTAssertFalse(drafts.contains { $0.contains("DO NOT DISPLAY") })
+        }
+    }
+    func testChatAllowsShortAnswersAndTimestampLedRepliesWithoutLectureSchema() throws {
+        var stream = CloudEventStream()
+        try stream.line(#"data: {"choices":[{"delta":{"content":"[01:20] Chapter seven."},"finish_reason":"stop"}]}"#)
+        try stream.line(""); try stream.line("data: [DONE]"); try stream.line("")
+        XCTAssertEqual(try stream.finishReply(), "[01:20] Chapter seven.")
+        XCTAssertEqual(try AIClient.cleanReply("Not captured."), "Not captured.")
+        XCTAssertThrowsError(try AIClient.cleanReply("<think>private"))
+        let request = try AIClient.questionRequest(key: "synthetic", prompt: "Question", provider: .openRouter, model: "fixed/model")
+        let body = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as! [String: Any]
+        XCTAssertEqual(body["model"] as? String, "fixed/model")
+        XCTAssertEqual(body["max_tokens"] as? Int, 900)
+        XCTAssertEqual(body["stream"] as? Bool, true)
+        let system = (body["messages"] as! [[String: String]])[0]["content"]!
+        XCTAssertEqual(system, MeetingChatContext.instruction)
+        XCTAssertFalse(system.contains("finished Markdown notes"))
+    }
+
     func testSSEMultilineDataCommentsReasoningAndDuplicateTerminalUsage() throws {
         var stream = CloudEventStream()
         for line in [": heartbeat", "", "event: message", "data: {\"choices\":", "data: [{\"delta\":{\"content\":\"## Main concept\\n- The condition matters.\"},\"finish_reason\":\"stop\"}]}", "", "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{}}", "", "data: [DONE]", ""] { try stream.line(line) }
