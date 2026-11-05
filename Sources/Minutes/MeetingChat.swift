@@ -29,6 +29,7 @@ import SwiftUI
         guard !meeting.transcript.isEmpty || !meeting.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { error = "Wait for a few words to be transcribed, or add your own notes first."; return }
         // Snapshot context at send time; incoming audio continues independently.
         activeID = id; draft = ""
+        if provider == .apple { AppleNotesAI.chatInProgress = true }
         let cloud = provider.cloud
         let model = cloud?.model
         let providerName = provider == .apple ? "Apple Intelligence" : cloud!.title
@@ -36,7 +37,7 @@ import SwiftUI
         store.update(id) { $0.chatMessages = ($0.chatMessages ?? []) + [MeetingChatMessage(role: "user", text: question)] }
         job = Task { [weak self] in
             guard let self else { return }
-            defer { self.activeID = nil; self.draft = ""; self.job = nil }
+            defer { if provider == .apple { AppleNotesAI.chatInProgress = false }; self.activeID = nil; self.draft = ""; self.job = nil }
             do {
                 let prompt = await Task.detached(priority: .userInitiated) { MeetingChatContext.prompt(meeting: meeting, question: question, local: provider == .apple) }.value
                 try Task.checkCancellation()

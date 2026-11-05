@@ -62,6 +62,7 @@ enum AppleTextBudget {
 }
 @MainActor enum AppleNotesAI {
     private static var completedSections: [String: String] = [:]
+    static var chatInProgress = false
     static func answerQuestion(_ prompt: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
         let availability = AppleAIAvailability.current
         guard availability.available else { throw AppFailure(availability.message) }
@@ -83,6 +84,10 @@ enum AppleTextBudget {
     }
 
     static func summarize(_ source: String, length: NotesLength = .complete, format: StudyFormat = .outline, fraction: @escaping @MainActor (Double) -> Void = { _ in }, progress: @escaping @MainActor (String) -> Void, partial: @escaping @MainActor (String) -> Void = { _ in }, activity: @escaping @MainActor ([NoteWorker]) -> Void = { _ in }, sections: @escaping @MainActor ([LiveNoteSection]) -> Void = { _ in }) async throws -> SummaryResult {
+        while chatInProgress {
+            progress("Waiting for your meeting reply…")
+            try await Task.sleep(nanoseconds: 150_000_000)
+        }
         let availability = AppleAIAvailability.current
         guard availability.available else { throw AppFailure(availability.message) }
         guard #available(macOS 27.0, *) else { throw AppFailure("Apple Intelligence requires macOS 27 or newer.") }
