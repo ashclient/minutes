@@ -110,6 +110,14 @@ enum NotesEditorFormat {
         let anchor = convert(window.convertFromScreen(screen), from: nil).intersection(visibleRect)
         aiPanel = panel
         panel.show(relativeTo: anchor.isEmpty ? NSRect(x: visibleRect.minX + 8, y: visibleRect.minY + 8, width: 1, height: 20) : anchor, of: self, preferredEdge: .maxY)
+        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--preview-editor-ai") }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak panel] in
+                let report: [String: Any] = ["shown": panel?.isShown ?? false, "width": panel?.contentSize.width ?? 0, "height": panel?.contentSize.height ?? 0, "selection": request.range.length]
+                if let data = try? JSONSerialization.data(withJSONObject: report) {
+                    try? data.write(to: URL(fileURLWithPath: "/tmp/Minutes-inline-check.json"))
+                }
+            }
+        }
     }
     func closeAITools() { aiPanel?.performClose(nil); aiPanel = nil }
     func popoverDidClose(_ notification: Notification) { aiPanel = nil }
@@ -271,7 +279,7 @@ private struct NativeNotesEditor: NSViewRepresentable {
         context.coordinator.lastMarkdown = text
         DispatchQueue.main.async {
             editor = view; view.measure()
-            if ProcessInfo.processInfo.arguments.contains("--preview-editor-ai") || ProcessInfo.processInfo.arguments.contains("--preview-editor-ai-blank") {
+            if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--preview-editor-ai") }) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     view.window?.makeFirstResponder(view)
                     view.setSelectedRange(NSRange(location: 0, length: ProcessInfo.processInfo.arguments.contains("--preview-editor-ai-blank") ? 0 : min(42, view.string.utf16.count)))

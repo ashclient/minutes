@@ -96,7 +96,7 @@ import AppKit
     let close: () -> Void
     @StateObject private var ai = InlineNotesAI()
     @State private var task = ""
-    @State private var expanded = false
+    @State private var expanded = ProcessInfo.processInfo.arguments.contains("--preview-editor-ai-expanded")
     var body: some View {
         VStack(spacing: 0) {
             if request.range.length > 0 && !expanded { selectionToolbar }

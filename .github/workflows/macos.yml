@@ -62,10 +62,14 @@ jobs:
       - name: Capture native notes editor
         continue-on-error: true
         run: |
-          for mode in editor-empty editor-formatted editor-ai editor-ai-blank; do
+          for mode in editor-empty editor-formatted editor-ai editor-ai-blank editor-ai-expanded; do
             if [ "$mode" = editor-ai-blank ]; then python3 Checks/preview_fixture.py --editor-empty; else python3 Checks/preview_fixture.py "--$mode"; fi
             open dist/Minutes.app --args "--preview-$mode"
             sleep 3
+            pgrep -x Minutes >/dev/null
+            if [[ "$mode" == editor-ai* ]]; then
+              python3 -c 'import json; d=json.load(open("/tmp/Minutes-inline-check.json")); assert d["shown"] and 200 <= d["width"] <= 500 and 30 <= d["height"] <= 700, d; print("Inline AI popover geometry passed:", d)'
+            fi
             screencapture -x "dist/Minutes-$mode.png"
             pkill -TERM -x Minutes || true
             sleep 1
