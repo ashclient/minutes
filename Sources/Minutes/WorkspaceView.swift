@@ -72,7 +72,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
         .sheet(isPresented: Binding(get: { editingID != nil }, set: { if !$0 { editingID = nil } })) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Edit AI notes").font(.headline)
-                ScrollView { NotesEditor(text: $draft, minimumHeight: 300, meeting: meeting, aiBusy: pipeline.working) }
+                ScrollView { NotesEditor(text: $draft, minimumHeight: 300, meeting: store.meetings.first { $0.id == editingID }, aiBusy: pipeline.working) }
                 HStack { Button("Cancel") { editingID = nil }; Spacer(); Button("Save") { if let id = editingID { store.update(id) { $0.summary = draft; $0.actions = [] }; if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await notion.sync(id: id, store: store) } } }; editingID = nil }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 560)
         }

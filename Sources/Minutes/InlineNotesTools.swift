@@ -96,7 +96,31 @@ import AppKit
     let close: () -> Void
     @StateObject private var ai = InlineNotesAI()
     @State private var task = ""
+    @State private var expanded = false
     var body: some View {
+        VStack(spacing: 0) {
+            if request.range.length > 0 && !expanded { selectionToolbar }
+            else { expandedTools }
+        }.onDisappear { ai.stop() }
+    }
+    private var selectionToolbar: some View {
+        HStack(spacing: 8) {
+            Button { expanded = true } label: { Label("Ask AI", systemImage: "text.bubble") }
+            Divider().frame(height: 18)
+            Button { format(.boldFontMask) } label: { Image(systemName: "bold") }.help("Bold").accessibilityLabel("Bold selection")
+            Button { format(.italicFontMask) } label: { Image(systemName: "italic") }.help("Italic").accessibilityLabel("Italic selection")
+            Divider().frame(height: 18)
+            Button("Explain") { expanded = true; generate("Explain the selected passage simply using the meeting evidence.") }
+            Button(action: close) { Image(systemName: "xmark") }.accessibilityLabel("Close selection tools")
+        }.font(.system(size: 12)).buttonStyle(QuietButtonStyle()).padding(10).fixedSize()
+    }
+    private func format(_ trait: NSFontTraitMask) {
+        if let editor = request.editor, let storage = editor.textStorage, storage.isEqual(to: request.original) {
+            editor.setSelectedRange(request.range); editor.toggleTrait(trait)
+        }
+        close()
+    }
+    private var expandedTools: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Label(request.range.length == 0 ? "Write with AI" : "Edit selection", systemImage: "text.bubble")
@@ -143,7 +167,7 @@ import AppKit
             if let error = ai.error { Text(error).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             Text(NotesAIProvider.selected == .apple ? "Apple Intelligence · on this Mac" : "Selected text and meeting context sent to \(NotesAIProvider.selected.cloud?.title ?? "AI")")
                 .font(.system(size: 10)).foregroundStyle(.tertiary)
-        }.padding(16).frame(width: 420).onDisappear { ai.stop() }
+        }.padding(16).frame(width: 420)
     }
     private func action(_ title: String, _ instruction: String) -> some View {
         Button(title) { generate(instruction) }.font(.system(size: 11)).buttonStyle(QuietButtonStyle())
