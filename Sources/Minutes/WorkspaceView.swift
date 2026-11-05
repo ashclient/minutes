@@ -12,6 +12,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
     @ObservedObject private var notion = NotionSync.shared
     @ObservedObject private var updater = AppUpdater.shared
     @AppStorage("includeComputer") private var includeComputer = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var chatOpen = false
     @State private var sidebar = true
     @State private var showCalendar = false
@@ -44,9 +45,15 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
                     footer
                 }
             }.background(Color(nsColor: .textBackgroundColor))
+            .overlay(alignment: .bottomTrailing) {
+                if !showCalendar, meeting != nil, !chatOpen {
+                    FloatingAskButton { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { chatOpen = true; sidebar = false } }
+                        .padding(.trailing, 18).padding(.bottom, 98)
+                }
+            }
             if chatOpen, !showCalendar, let meeting {
                 Divider()
-                MeetingChatView(id: meeting.id) { chatOpen = false }.id(meeting.id).frame(width: 340)
+                MeetingChatView(id: meeting.id) { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { chatOpen = false } }.id(meeting.id).frame(width: 360).transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }.tint(Color.primary)
         .confirmationDialog("Keep the notes generated so far?", isPresented: Binding(get: { pipeline.draftDecisionID != nil }, set: { _ in })) {
@@ -65,7 +72,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
         .sheet(isPresented: Binding(get: { editingID != nil }, set: { if !$0 { editingID = nil } })) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Edit AI notes").font(.headline)
-                TextEditor(text: $draft).font(.body).frame(minHeight: 300)
+                ScrollView { NotesEditor(text: $draft, minimumHeight: 300, meeting: store.meetings.first { $0.id == editingID }, aiBusy: pipeline.working) }
                 HStack { Button("Cancel") { editingID = nil }; Spacer(); Button("Save") { if let id = editingID { store.update(id) { $0.summary = draft; $0.actions = [] }; if UserDefaults.standard.bool(forKey: "notionAutoSync") { Task { await notion.sync(id: id, store: store) } } }; editingID = nil }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 560)
         }
@@ -186,8 +193,6 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             Button { withAnimation(.easeInOut(duration: 0.18)) { sidebar.toggle() } } label: { Image(systemName: "sidebar.left") }.help("Toggle sidebar").accessibilityLabel("Toggle sidebar")
             Text(showCalendar ? "Calendar" : meeting?.eventCalendar ?? "Notes").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1); Spacer()
             if let meeting, !showCalendar {
-                Button { chatOpen.toggle(); if chatOpen { sidebar = false } } label: { Label("Ask", systemImage: "bubble.right") }
-                    .help("Ask questions using this meeting’s live transcript").accessibilityLabel("Ask this meeting")
                 if let raw = meeting.notionURL, let url = URL(string: raw) { Link(destination: url) { Label("Open in Notion", systemImage: "arrow.up.right").font(.system(size: 11)) } }
                 Menu {
                     Button("Export notes…") { store.export(meeting) }
@@ -219,7 +224,7 @@ private struct SettingsRoute: Identifiable { let tab: String; var id: String { t
             }
             VStack(alignment: .leading, spacing: 10) {
                 Text("Your notes").font(.system(size: 13, weight: .semibold))
-                NotesEditor(text: Binding(get: { meeting?.notes ?? "" }, set: { value in store.update(note.id) { $0.notes = value } }), minimumHeight: note.summary.isEmpty ? 220 : 130).id(note.id)
+                NotesEditor(text: Binding(get: { meeting?.notes ?? "" }, set: { value in store.update(note.id) { $0.notes = value } }), minimumHeight: note.summary.isEmpty ? 220 : 130, meeting: note, aiBusy: pipeline.working).id(note.id)
             }
             if pipeline.activeID == note.id && !pipeline.liveDraft.isEmpty {
                 Divider()

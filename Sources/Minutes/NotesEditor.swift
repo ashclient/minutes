@@ -88,10 +88,43 @@ enum NotesEditorFormat {
     }
 }
 
-@MainActor final class NotesTextView: NSTextView {
-    var placeholder = "Write notes, questions, or / for formatting…"
+@MainActor final class NotesTextView: NSTextView, NSPopoverDelegate {
+    var placeholder = "Write notes, press Space for AI, or / for formatting…"
     var heightChanged: ((CGFloat) -> Void)?
     var showFormatting: (() -> Void)?
+    var aiMeeting: Meeting?
+    var aiBusy = false
+    private var aiPanel: NSPopover?
+    func openAITools() {
+        guard aiPanel == nil, let window, isEditable else { return }
+        let range = selectedRange()
+        let request = NotesAISelection(editor: self, range: range)
+        let panel = NSPopover()
+        panel.behavior = .transient
+        panel.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        panel.delegate = self
+        let host = NSHostingController(rootView: InlineNotesTools(request: request, meeting: aiMeeting, appleBusy: aiBusy) { [weak panel] in panel?.performClose(nil) })
+        host.sizingOptions = [.preferredContentSize]
+        panel.contentViewController = host
+        let screen = firstRect(forCharacterRange: request.range, actualRange: nil)
+        let anchor = convert(window.convertFromScreen(screen), from: nil).intersection(visibleRect)
+        aiPanel = panel
+        panel.show(relativeTo: anchor.isEmpty ? NSRect(x: visibleRect.minX + 8, y: visibleRect.minY + 8, width: 1, height: 20) : anchor, of: self, preferredEdge: .maxY)
+        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--preview-editor-ai") }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak panel] in
+                let report: [String: Any] = ["shown": panel?.isShown ?? false, "width": panel?.contentSize.width ?? 0, "height": panel?.contentSize.height ?? 0, "selection": request.range.length]
+                if let data = try? JSONSerialization.data(withJSONObject: report) {
+                    try? data.write(to: URL(fileURLWithPath: "/tmp/Minutes-inline-check.json"))
+                }
+            }
+        }
+    }
+    func closeAITools() { aiPanel?.performClose(nil); aiPanel = nil }
+    func popoverDidClose(_ notification: Notification) { aiPanel = nil }
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        if selectedRange().length > 0 { openAITools() }
+    }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if string.isEmpty {
@@ -168,6 +201,10 @@ enum NotesEditorFormat {
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "b" { toggleTrait(.boldFontMask); return }
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "i" { toggleTrait(.italicFontMask); return }
+        if event.characters == " ", !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control), !event.modifierFlags.contains(.option),
+           !hasMarkedText(), NotesAISelection.blankLine(string, range: selectedRange()) {
+            openAITools(); return
+        }
         // Slash is a discoverable formatting shortcut only at an empty line.
         if event.characters == "/", (string as NSString).substring(with: (string as NSString).paragraphRange(for: selectedRange())).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { showFormatting?(); return }
         super.keyDown(with: event)
@@ -189,6 +226,8 @@ enum NotesEditorFormat {
 struct NotesEditor: View {
     @Binding var text: String
     var minimumHeight: CGFloat = 180
+    var meeting: Meeting? = nil
+    var aiBusy = false
     @State private var contentHeight: CGFloat = 180
     @State private var editor: NotesTextView?
     @State private var formatting = false
@@ -199,9 +238,10 @@ struct NotesEditor: View {
                     .menuStyle(.borderlessButton).frame(width: 68)
                 Button { editor?.toggleTrait(.boldFontMask) } label: { Image(systemName: "bold") }.help("Bold (⌘B)")
                 Button { editor?.toggleTrait(.italicFontMask) } label: { Image(systemName: "italic") }.help("Italic (⌘I)")
+                Button { editor?.openAITools() } label: { Label("Ask AI", systemImage: "text.bubble") }.help("Write or edit with AI")
                 Button { editor?.toggleList() } label: { Image(systemName: "list.bullet") }.help("Bulleted list")
             }.buttonStyle(QuietButtonStyle()).font(.system(size: 13)).foregroundStyle(.secondary)
-            NativeNotesEditor(text: $text, height: $contentHeight, editor: $editor, formatting: $formatting)
+            NativeNotesEditor(text: $text, height: $contentHeight, editor: $editor, formatting: $formatting, meeting: meeting, aiBusy: aiBusy)
                 .frame(height: max(minimumHeight, contentHeight))
                 .popover(isPresented: $formatting, arrowEdge: .top) {
                     VStack(alignment: .leading) {
@@ -217,6 +257,8 @@ private struct NativeNotesEditor: NSViewRepresentable {
     @Binding var height: CGFloat
     @Binding var editor: NotesTextView?
     @Binding var formatting: Bool
+    var meeting: Meeting?
+    var aiBusy: Bool
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView(); scroll.drawsBackground = false; scroll.hasVerticalScroller = false
@@ -232,10 +274,18 @@ private struct NativeNotesEditor: NSViewRepresentable {
         view.delegate = context.coordinator
         view.heightChanged = { value in DispatchQueue.main.async { if abs(height - value) > 1 { height = value } } }
         view.showFormatting = { formatting = true }
+        view.aiMeeting = meeting; view.aiBusy = aiBusy
         scroll.documentView = view
         context.coordinator.lastMarkdown = text
         DispatchQueue.main.async {
             editor = view; view.measure()
+            if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--preview-editor-ai") }) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    view.window?.makeFirstResponder(view)
+                    view.setSelectedRange(NSRange(location: 0, length: ProcessInfo.processInfo.arguments.contains("--preview-editor-ai-blank") ? 0 : min(42, view.string.utf16.count)))
+                    view.openAITools()
+                }
+            }
             if ProcessInfo.processInfo.arguments.contains("--preview-editor-empty") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { view.window?.makeFirstResponder(view) }
             }
@@ -245,6 +295,7 @@ private struct NativeNotesEditor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let view = scroll.documentView as? NotesTextView else { return }
+        view.aiMeeting = meeting; view.aiBusy = aiBusy
         if text != context.coordinator.lastMarkdown {
             let selection = view.selectedRange()
             view.textStorage?.setAttributedString(NotesEditorFormat.attributed(text))
@@ -256,6 +307,7 @@ private struct NativeNotesEditor: NSViewRepresentable {
     }
     static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
         guard let view = scroll.documentView as? NotesTextView else { return }
+        view.closeAITools(); view.aiMeeting = nil
         view.delegate = nil; view.heightChanged = nil; view.showFormatting = nil
     }
     final class Coordinator: NSObject, NSTextViewDelegate {
