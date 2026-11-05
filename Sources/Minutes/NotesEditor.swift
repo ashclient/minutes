@@ -103,9 +103,10 @@ enum NotesEditorFormat {
         panel.behavior = .transient
         panel.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         panel.delegate = self
-        panel.contentSize = NSSize(width: 420, height: 420)
-        panel.contentViewController = NSHostingController(rootView: InlineNotesTools(request: request, meeting: aiMeeting, appleBusy: aiBusy) { [weak panel] in panel?.performClose(nil) })
-        let screen = firstRect(forCharacterRange: range, actualRange: nil)
+        let host = NSHostingController(rootView: InlineNotesTools(request: request, meeting: aiMeeting, appleBusy: aiBusy) { [weak panel] in panel?.performClose(nil) })
+        host.sizingOptions = [.preferredContentSize]
+        panel.contentViewController = host
+        let screen = firstRect(forCharacterRange: request.range, actualRange: nil)
         let anchor = convert(window.convertFromScreen(screen), from: nil).intersection(visibleRect)
         aiPanel = panel
         panel.show(relativeTo: anchor.isEmpty ? NSRect(x: visibleRect.minX + 8, y: visibleRect.minY + 8, width: 1, height: 20) : anchor, of: self, preferredEdge: .maxY)
