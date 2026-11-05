@@ -63,12 +63,12 @@ enum AppleTextBudget {
 @MainActor enum AppleNotesAI {
     private static var completedSections: [String: String] = [:]
     static var chatInProgress = false
-    static func answerQuestion(_ prompt: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
+    static func answerQuestion(_ prompt: String, instruction: String = MeetingChatContext.instruction, partial: @escaping @MainActor (String) -> Void) async throws -> String {
         let availability = AppleAIAvailability.current
         guard availability.available else { throw AppFailure(availability.message) }
         guard #available(macOS 27.0, *) else { throw AppFailure("Apple Intelligence requires macOS 27 or newer.") }
         let result = await AsyncDeadline.run(seconds: 90) {
-            let session = LanguageModelSession(instructions: MeetingChatContext.instruction)
+            let session = LanguageModelSession(instructions: instruction)
             var output = "", last = Date.distantPast
             for try await snapshot in session.streamResponse(to: prompt, options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 600)) {
                 try Task.checkCancellation(); output = snapshot.content

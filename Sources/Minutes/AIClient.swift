@@ -239,16 +239,16 @@ struct AIClient: Sendable {
               let message = choice["message"] as? [String: Any], let content = message["content"] as? String else { throw CloudFormatFailure() }
         return try cleanReply(content)
     }
-    static func questionRequest(key: String, prompt: String, provider: CloudAIProvider, model: String?) throws -> URLRequest {
-        var request = try Self.request(key: key, system: MeetingChatContext.instruction, text: prompt, provider: provider, markdown: true, streaming: true, model: model)
+    static func questionRequest(key: String, prompt: String, provider: CloudAIProvider, model: String?, instruction: String = MeetingChatContext.instruction) throws -> URLRequest {
+        var request = try Self.request(key: key, system: instruction, text: prompt, provider: provider, markdown: true, streaming: true, model: model)
         var body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
         body["max_tokens"] = 900
-        body["messages"] = [["role": "system", "content": MeetingChatContext.instruction], ["role": "user", "content": prompt]]
+        body["messages"] = [["role": "system", "content": instruction], ["role": "user", "content": prompt]]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
     }
-    func answerQuestion(_ prompt: String, partial: @escaping @MainActor (String) -> Void) async throws -> String {
-        let request = try Self.questionRequest(key: apiKey, prompt: prompt, provider: provider, model: model)
+    func answerQuestion(_ prompt: String, instruction: String = MeetingChatContext.instruction, partial: @escaping @MainActor (String) -> Void) async throws -> String {
+        let request = try Self.questionRequest(key: apiKey, prompt: prompt, provider: provider, model: model, instruction: instruction)
         return try await stream(request, reply: true, partial: partial).summary
     }
     func checkConnection() async throws {

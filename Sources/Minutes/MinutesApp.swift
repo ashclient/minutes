@@ -16,7 +16,7 @@ import AppKit
                 .frame(minWidth: 850, minHeight: 560)
                 .task { await AppUpdater.shared.checkIfDue() }
                 .onAppear {
-                    AppUpdater.shared.idle = { !chat.busy && !recorder.recording && !pipeline.working && pipeline.draftDecisionID == nil && pipeline.finishID == nil && NotionSync.shared.syncing.isEmpty && !store.busy }
+                    AppUpdater.shared.idle = { InlineNotesAI.activeCount == 0 && !chat.busy && !recorder.recording && !pipeline.working && pipeline.draftDecisionID == nil && pipeline.finishID == nil && NotionSync.shared.syncing.isEmpty && !store.busy }
                     AppUpdater.shared.save = { store.saveNow() }
                     delegate.chat = chat; delegate.store = store; delegate.recorder = recorder; delegate.pipeline = pipeline; delegate.floating.configure(store: store, recorder: recorder, pipeline: pipeline) }
         }

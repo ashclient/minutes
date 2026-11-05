@@ -25,7 +25,7 @@ import SwiftUI
         error = nil; errorID = id
         let provider = NotesAIProvider.selected
         guard provider.configured else { error = "Choose an available AI provider in Settings first."; return }
-        guard provider != .apple || !appleBusy else { error = "Apple Intelligence is finishing notes. Ask again when it finishes, or choose a cloud provider in Settings."; return }
+        guard provider != .apple || (!appleBusy && !AppleNotesAI.chatInProgress) else { error = "Apple Intelligence is finishing notes. Ask again when it finishes, or choose a cloud provider in Settings."; return }
         guard !meeting.transcript.isEmpty || !meeting.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { error = "Wait for a few words to be transcribed, or add your own notes first."; return }
         // Snapshot context at send time; incoming audio continues independently.
         activeID = id; draft = ""

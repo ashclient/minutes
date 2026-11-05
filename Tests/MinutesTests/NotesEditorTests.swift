@@ -3,6 +3,32 @@ import AppKit
 @testable import Minutes
 
 final class NotesEditorTests: XCTestCase {
+    @MainActor func testBlankLineAITriggerRespectsSelectionAndWhitespace() {
+        XCTAssertTrue(NotesAISelection.blankLine("", range: NSRange(location: 0, length: 0)))
+        XCTAssertTrue(NotesAISelection.blankLine("Heading\n   \nNext", range: NSRange(location: 10, length: 0)))
+        XCTAssertFalse(NotesAISelection.blankLine("Written text", range: NSRange(location: 3, length: 0)))
+        XCTAssertFalse(NotesAISelection.blankLine(" \n", range: NSRange(location: 0, length: 1)))
+    }
+    @MainActor func testAIReplaceAndInsertPreserveOtherNotes() {
+        let view = NotesTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
+        view.allowsUndo = true
+        view.textStorage?.setAttributedString(NotesEditorFormat.attributed("First point\nKeep this."))
+        let selected = NotesAISelection(editor: view, range: NSRange(location: 0, length: 11))
+        XCTAssertTrue(selected.apply("- Better point", replacing: true))
+        XCTAssertEqual(NotesEditorFormat.markdown(view.textStorage!), "- Better point\nKeep this.")
+        let insertion = NotesAISelection(editor: view, range: NSRange(location: 0, length: 14))
+        XCTAssertTrue(insertion.apply("Explanation.", replacing: false))
+        XCTAssertTrue(view.string.contains("Explanation.\nKeep this."))
+    }
+    @MainActor func testAIRefusesToOverwriteConcurrentEditsAndKeepsRichSelection() {
+        let view = NotesTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
+        view.textStorage?.setAttributedString(NotesEditorFormat.attributed("**Important** condition"))
+        let selected = NotesAISelection(editor: view, range: NSRange(location: 0, length: 9))
+        XCTAssertEqual(selected.selectedText, "**Important**")
+        view.insertText("New ", replacementRange: NSRange(location: 0, length: 0))
+        XCTAssertFalse(selected.apply("Replacement", replacing: true))
+        XCTAssertTrue(view.string.hasPrefix("New Important"))
+    }
     @MainActor func testRoundTripHeadingsEmphasisListsAndUnicode() {
         let markdown = "## Composition\nA **function** uses *input*.\n- First 👩🏽‍🎓\n  - Nested detail\n1. Substitute x.\n2. Evaluate.\n\n### Formula\nUse `f(x)` here.\n"
         let rich = NotesEditorFormat.attributed(markdown)
