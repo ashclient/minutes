@@ -79,7 +79,7 @@ import AppKit
                 else {
                     let target = cloud ?? .openRouter
                     let key = try CloudKey.read(service: target.service)
-                    draft = try await AIClient(apiKey: key, provider: target, model: model).answerQuestion(prompt, instruction: Self.instruction, partial: partial)
+                    draft = try await AIClient(apiKey: key, provider: target, model: model).answerQuestion(prompt, instruction: Self.instruction, responseTokens: 4096, partial: partial)
                 }
             } catch {
                 if !Task.isCancelled { self.error = error.localizedDescription }
