@@ -102,6 +102,11 @@ import AppKit
             if request.range.length > 0 && !expanded { selectionToolbar }
             else { expandedTools }
         }.onDisappear { ai.stop() }
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("--preview-editor-ai-expanded") {
+                ai.draft = "## Clearer notes\n- Keep the original meaning.\n- Group related ideas together.\n- Preserve useful examples and formulas."
+            }
+        }
     }
     private var selectionToolbar: some View {
         HStack(spacing: 8) {
@@ -152,7 +157,7 @@ import AppKit
                 ScrollView {
                     if ai.draft.isEmpty { HStack { ProgressView().controlSize(.small); Text("Working on your selection…").foregroundStyle(.secondary) }.padding(.vertical, 12) }
                     else { NoteDocument(text: ai.draft).equatable().frame(maxWidth: .infinity, alignment: .leading) }
-                }.frame(maxHeight: 210)
+                }.frame(height: 180)
                 HStack {
                     if ai.running { Button("Stop") { ai.stop() } }
                     else {
